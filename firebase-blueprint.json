@@ -1,0 +1,132 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role and team memberships.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["user", "fleet_admin", "admin"] },
+        "teamIds": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "email", "role", "isActive"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Business team or department with dedicated vehicles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "isActive"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Company vehicle assigned to a team.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teamId": { "type": "string" },
+        "licensePlate": { "type": "string", "maxLength": 20 },
+        "brand": { "type": "string", "maxLength": 50 },
+        "model": { "type": "string", "maxLength": 50 },
+        "nickname": { "type": "string", "maxLength": 50 },
+        "isActive": { "type": "boolean" },
+        "lastKnownKm": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "teamId", "licensePlate", "brand", "model", "isActive"]
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "Recorded vehicle trip with start/end mileage and status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teamId": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "licensePlate": { "type": "string" },
+        "vehicleName": { "type": "string" },
+        "startTime": { "type": "string" },
+        "startKm": { "type": "number" },
+        "endTime": { "type": "string" },
+        "endKm": { "type": "number" },
+        "purpose": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["open", "closed", "auto_closed"] },
+        "closedAutomatically": { "type": "boolean" },
+        "closedReason": { "type": "string" },
+        "closedByUserId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "vehicleId", "userId", "startKm", "purpose", "status"]
+    },
+    "DailyReading": {
+      "title": "DailyReading",
+      "description": "Daily odometer check (start/stop) per vehicle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teamId": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "readingDate": { "type": "string" },
+        "readingType": { "type": "string", "enum": ["start", "stop"] },
+        "km": { "type": "number" },
+        "recordedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "vehicleId", "userId", "readingDate", "readingType", "km"]
+    },
+    "NotificationSettings": {
+      "title": "NotificationSettings",
+      "description": "Weekday reminders for trip registration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "schedules": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "schedules"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles and role configurations."
+    },
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "Business departments/fleets."
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Company vehicles fleet."
+    },
+    "/trips/{tripId}": {
+      "schema": { "$ref": "#/entities/Trip" },
+      "description": "Trip logs with auto-closing."
+    },
+    "/daily_readings/{readingId}": {
+      "schema": { "$ref": "#/entities/DailyReading" },
+      "description": "Daily odometer checks."
+    },
+    "/notification_settings/{userId}": {
+      "schema": { "$ref": "#/entities/NotificationSettings" },
+      "description": "Trip reminder settings per user."
+    }
+  }
+}

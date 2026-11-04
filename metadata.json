@@ -1,0 +1,8 @@
+{
+  "name": "Ritten Logboek",
+  "description": "Professionele ritregistratie-app voor bedrijfswagens met geautomatiseerde ritoverdracht en teamfunctionaliteit.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
