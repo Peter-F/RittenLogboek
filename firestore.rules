@@ -46,6 +46,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // App settings (purposes, expected km thresholds)
+    match /app_settings/{settingId} {
+      allow read, write: if true;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

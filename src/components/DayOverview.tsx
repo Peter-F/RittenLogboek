@@ -13,6 +13,7 @@ import {
   Filter,
   CheckCircle2,
   Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { exportTripsToCSV } from '../services/tripService';
 
@@ -41,6 +42,7 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('all');
+  const [onlyAnomalies, setOnlyAnomalies] = useState<boolean>(false);
 
   // Change date by delta days (-1 or +1)
   const changeDateBy = (days: number) => {
@@ -80,10 +82,15 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
           return false;
         }
 
+        // Anomaly / Warning filter
+        if (onlyAnomalies && !t.hasKmDiscrepancy && !t.isUnusualDistance) {
+          return false;
+        }
+
         return true;
       })
       .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  }, [trips, selectedDate, selectedTeamId, selectedVehicleId]);
+  }, [trips, selectedDate, selectedTeamId, selectedVehicleId, onlyAnomalies]);
 
   // Daily statistics
   const totalDayKm = dayTrips.reduce((acc, t) => {
@@ -236,6 +243,20 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
             </option>
           ))}
         </select>
+
+        {/* Anomaly filter toggle */}
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-700 cursor-pointer select-none ml-auto">
+          <input
+            type="checkbox"
+            checked={onlyAnomalies}
+            onChange={(e) => setOnlyAnomalies(e.target.checked)}
+            className="w-3.5 h-3.5 rounded text-amber-600 focus:ring-amber-500"
+          />
+          <span className="flex items-center gap-1">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            Enkel KM-afwijkingen of &gt; richtgetal
+          </span>
+        </label>
       </div>
 
       {/* Trips Timeline / Table for that Day */}
@@ -310,6 +331,27 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
                     {trip.closedReason && (
                       <div className="text-[11px] text-blue-700 bg-blue-50/80 px-2 py-1 rounded inline-block">
                         ℹ️ {trip.closedReason}
+                      </div>
+                    )}
+
+                    {/* Discrepancy indicator for admin */}
+                    {trip.hasKmDiscrepancy && isFleetAdmin && (
+                      <div className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-md">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>
+                          KM-sprong start: {(trip.kmDiscrepancy || 0) > 0 ? '+' : ''}
+                          {trip.kmDiscrepancy} km t.o.v. vorige wagenstand
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Unusual distance indicator */}
+                    {trip.isUnusualDistance && (
+                      <div className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-900 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-md">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <span>
+                          Afwijkende afstand ({kmDriven} km &gt; richtgetal {trip.expectedTripKm || 50} km)
+                        </span>
                       </div>
                     )}
                   </div>

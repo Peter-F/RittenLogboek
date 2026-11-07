@@ -19,6 +19,7 @@ import {
   NotificationSettings,
   WeekdayReminder,
   UserProfile,
+  AppSettings,
 } from '../types';
 
 // Default teams
@@ -134,6 +135,47 @@ export const DEFAULT_WEEKDAY_SCHEDULES: WeekdayReminder[] = [
   { dayOfWeek: 0, dayName: 'Zondag', isActive: false, startTime: '08:00', stopTime: '13:00' },
 ];
 
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  id: 'global_settings',
+  purposes: [
+    'Klantbezoek',
+    'Werf / Installatie',
+    'Materiaal ophalen / Leverancier',
+    'Interventie / Storing',
+    'Onderhoud / Keuring',
+    'Woon-werk / Verplaatsing',
+    'Intern transport',
+  ],
+  defaultExpectedDailyKm: 50,
+  updatedAt: new Date().toISOString(),
+};
+
+export async function getAppSettings(): Promise<AppSettings> {
+  try {
+    const snap = await getDoc(doc(db, 'app_settings', 'global_settings'));
+    if (snap.exists()) {
+      return snap.data() as AppSettings;
+    }
+    await setDoc(doc(db, 'app_settings', 'global_settings'), DEFAULT_APP_SETTINGS);
+    return DEFAULT_APP_SETTINGS;
+  } catch (err) {
+    console.warn('Error fetching app settings, using defaults:', err);
+    return DEFAULT_APP_SETTINGS;
+  }
+}
+
+export async function updateAppSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+  const current = await getAppSettings();
+  const updated: AppSettings = {
+    ...current,
+    ...settings,
+    updatedAt: new Date().toISOString(),
+  };
+  await setDoc(doc(db, 'app_settings', 'global_settings'), updated);
+  return updated;
+}
+
+
 /**
  * Seeds initial collections if database is empty so the app is instantly usable
  */
@@ -239,6 +281,50 @@ export async function seedInitialDataIfEmpty() {
 }
 
 /**
+ * Calculates the true latest known kilometer stand of a vehicle:
+ * 1. Checks all closed or auto-closed trips for this vehicle and finds the most recent endKm (stopkilometerstand van de vorige rit).
+ * 2. Checks any open trip for this vehicle (its startKm).
+ * 3. Checks vehicle.lastKnownKm recorded in the database document.
+ * Returns the true latest confirmed mileage, preventing stale start values.
+ */
+export function getLatestVehicleMileage(vehicle?: Vehicle | null, allTrips: Trip[] = []): number {
+  if (!vehicle) return 0;
+
+  // 1. Find all trips for this vehicle
+  const vehicleTrips = allTrips.filter(
+    (t) =>
+      t.vehicleId === vehicle.id ||
+      (vehicle.licensePlate && t.licensePlate?.toLowerCase() === vehicle.licensePlate.toLowerCase())
+  );
+
+  // 2. Find the most recent closed/auto_closed trip with a valid endKm
+  const closedTrips = vehicleTrips
+    .filter(
+      (t) =>
+        (t.status === 'closed' || t.status === 'auto_closed') &&
+        typeof t.endKm === 'number' &&
+        t.endKm > 0
+    )
+    .sort((a, b) => {
+      const timeA = new Date(a.endTime || a.updatedAt || a.createdAt).getTime();
+      const timeB = new Date(b.endTime || b.updatedAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+
+  const latestClosedEndKm = closedTrips[0]?.endKm || 0;
+
+  // 3. Check if there is an active open trip currently
+  const openTrip = vehicleTrips.find((t) => t.status === 'open');
+  const openTripStartKm = openTrip?.startKm || 0;
+
+  // 4. Vehicle's recorded lastKnownKm
+  const vehicleRecordedKm = vehicle.lastKnownKm || 0;
+
+  // The true latest km is the most recent closed endKm, or the vehicle's recorded km, or open startKm
+  return Math.max(vehicleRecordedKm, latestClosedEndKm, openTripStartKm);
+}
+
+/**
  * START TRIP WITH ATOMIC HANDOVER
  * Enforces business rule: Exactly one open trip per vehicle.
  * If user B starts a trip for a vehicle currently open by user A:
@@ -295,6 +381,11 @@ export async function startNewTrip(params: {
         lastKnownKm: startKm,
       });
 
+      // Discrepancy calculation: check difference between startKm and previous known mileage
+      const prevKm = vehicle.lastKnownKm || 0;
+      const kmDiscrepancy = prevKm > 0 ? startKm - prevKm : 0;
+      const hasKmDiscrepancy = Math.abs(kmDiscrepancy) > 0;
+
       // Create the new trip
       const newTrip: Trip = {
         id: newTripId,
@@ -311,6 +402,8 @@ export async function startNewTrip(params: {
         notes: notes || '',
         status: 'open',
         closedAutomatically: false,
+        kmDiscrepancy,
+        hasKmDiscrepancy,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -335,13 +428,17 @@ export async function closeTrip(params: {
   endKm: number;
   notes?: string;
   endTime?: string;
+  expectedDailyKm?: number;
 }) {
-  const { tripId, vehicleId, startKm, endKm, notes } = params;
+  const { tripId, vehicleId, startKm, endKm, notes, expectedDailyKm } = params;
   if (endKm < startKm) {
     throw new Error('Stopkilometerstand kan niet lager zijn dan de startkilometerstand.');
   }
 
   const endTime = params.endTime || new Date().toISOString();
+  const drivenDistance = endKm - startKm;
+  const threshold = expectedDailyKm || 50;
+  const isUnusualDistance = drivenDistance > threshold;
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -354,6 +451,8 @@ export async function closeTrip(params: {
         status: 'closed',
         closedAutomatically: false,
         notes: notes || '',
+        isUnusualDistance,
+        expectedTripKm: threshold,
         updatedAt: new Date().toISOString(),
       });
 
@@ -376,8 +475,9 @@ export async function adminManualCloseTrip(params: {
   endTime: string;
   reason: string;
   adminUser: UserProfile;
+  expectedDailyKm?: number;
 }) {
-  const { tripId, vehicleId, endKm, endTime, reason, adminUser } = params;
+  const { tripId, vehicleId, endKm, endTime, reason, adminUser, expectedDailyKm } = params;
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -394,6 +494,10 @@ export async function adminManualCloseTrip(params: {
         throw new Error('Stopkilometerstand kan niet lager zijn dan de startkilometerstand.');
       }
 
+      const drivenDistance = endKm - tripData.startKm;
+      const threshold = expectedDailyKm || 50;
+      const isUnusualDistance = drivenDistance > threshold;
+
       transaction.update(tripRef, {
         endTime,
         endKm,
@@ -402,6 +506,8 @@ export async function adminManualCloseTrip(params: {
         closedReason: `Handmatig afgesloten door beheerder (${adminUser.fullName}): ${reason}`,
         closedByUserId: adminUser.id,
         closedByUserName: adminUser.fullName,
+        isUnusualDistance,
+        expectedTripKm: threshold,
         updatedAt: new Date().toISOString(),
       });
 
@@ -491,6 +597,8 @@ export function exportTripsToCSV(trips: Trip[], filename = 'ritten_export.csv') 
     'Start KM',
     'Stop KM',
     'Afstand (km)',
+    'KM-Afwijking start',
+    'Ongebruikelijk (> Richtgetal)',
     'Doel',
     'Status',
     'Automatisch afgesloten',
@@ -513,6 +621,14 @@ export function exportTripsToCSV(trips: Trip[], filename = 'ritten_export.csv') 
         ? 'Automatisch afgesloten'
         : 'Afgesloten';
 
+    const discrepancyLabel = trip.hasKmDiscrepancy
+      ? `${(trip.kmDiscrepancy || 0) > 0 ? '+' : ''}${trip.kmDiscrepancy} km`
+      : '0 km';
+
+    const unusualLabel = trip.isUnusualDistance
+      ? `Ja (richtgetal: ${trip.expectedTripKm || 50} km)`
+      : 'Nee';
+
     const reasonOrNotes = [trip.closedReason, trip.notes].filter(Boolean).join(' | ');
 
     return [
@@ -525,6 +641,8 @@ export function exportTripsToCSV(trips: Trip[], filename = 'ritten_export.csv') 
       trip.startKm,
       trip.endKm !== undefined ? trip.endKm : '',
       distance,
+      `"${discrepancyLabel}"`,
+      `"${unusualLabel}"`,
       `"${trip.purpose.replace(/"/g, '""')}"`,
       `"${statusLabel}"`,
       trip.closedAutomatically ? 'Ja' : 'Nee',
@@ -585,6 +703,29 @@ export async function updateTeam(id: string, updates: Partial<Team>) {
   await updateDoc(doc(db, 'teams', id), updates);
 }
 
-export async function updateUserProfile(id: string, updates: Partial<UserProfile>) {
+export async function updateUserProfile(
+  id: string,
+  updates: Partial<UserProfile>,
+  currentActor?: UserProfile
+) {
+  if (currentActor && currentActor.role !== 'admin') {
+    // 1. A fleet_admin or regular user cannot assign 'admin' role
+    if (updates.role === 'admin') {
+      throw new Error(
+        'Onbevoegd: alleen een Systeem Administrator (admin) mag de beheerdersrol "admin" toekennen.'
+      );
+    }
+
+    // 2. A fleet_admin cannot modify an existing admin profile or revoke admin rights
+    const targetSnap = await getDoc(doc(db, 'profiles', id));
+    if (targetSnap.exists() && targetSnap.data().role === 'admin') {
+      throw new Error(
+        'Onbevoegd: een Wagen Administrator mag de rechten of gegevens van een Systeem Administrator niet wijzigen.'
+      );
+    }
+  }
+
   await updateDoc(doc(db, 'profiles', id), updates);
 }
+
+

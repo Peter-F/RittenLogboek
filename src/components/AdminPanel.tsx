@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Trip, Vehicle, Team, UserProfile, UserRole } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Trip, Vehicle, Team, UserProfile, UserRole, AppSettings } from '../types';
 import { StatusBadge } from './StatusBadge';
+import { QRCodeModal } from './QRCodeModal';
 import {
   ShieldCheck,
   Car,
@@ -17,6 +18,11 @@ import {
   Building,
   KeyRound,
   FileCheck,
+  QrCode,
+  Tag,
+  Sliders,
+  RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import {
   adminManualCloseTrip,
@@ -26,6 +32,9 @@ import {
   addTeam,
   updateTeam,
   updateUserProfile,
+  getAppSettings,
+  updateAppSettings,
+  DEFAULT_APP_SETTINGS,
 } from '../services/tripService';
 
 interface AdminPanelProps {
@@ -34,6 +43,8 @@ interface AdminPanelProps {
   vehicles: Vehicle[];
   teams: Team[];
   profiles: UserProfile[];
+  appSettings?: AppSettings;
+  onAppSettingsChange?: (s: AppSettings) => void;
   onSuccess: (msg: string) => void;
 }
 
@@ -43,14 +54,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   vehicles,
   teams,
   profiles,
+  appSettings,
+  onAppSettingsChange,
   onSuccess,
 }) => {
   const isSuperAdmin = currentUser.role === 'admin';
   const isFleetAdmin = currentUser.role === 'fleet_admin' || isSuperAdmin;
 
-  const [activeTab, setActiveTab] = useState<'open_trips' | 'vehicles' | 'users' | 'teams'>(
-    'open_trips'
+  const [activeTab, setActiveTab] = useState<
+    'open_trips' | 'vehicles' | 'users' | 'teams' | 'settings'
+  >('open_trips');
+
+  // QR Modal State
+  const [selectedQrVehicle, setSelectedQrVehicle] = useState<Vehicle | null>(null);
+
+  // Settings State (Purposes / Tags & Richtgetal)
+  const [purposesList, setPurposesList] = useState<string[]>(
+    appSettings?.purposes || DEFAULT_APP_SETTINGS.purposes
   );
+  const [newPurposeInput, setNewPurposeInput] = useState<string>('');
+  const [guidelineDailyKm, setGuidelineDailyKm] = useState<number>(
+    appSettings?.defaultExpectedDailyKm || DEFAULT_APP_SETTINGS.defaultExpectedDailyKm
+  );
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  // Sync settings if prop changes
+  useEffect(() => {
+    if (appSettings) {
+      setPurposesList(appSettings.purposes);
+      setGuidelineDailyKm(appSettings.defaultExpectedDailyKm);
+    }
+  }, [appSettings]);
 
   // Manual close modal state
   const [closingTrip, setClosingTrip] = useState<Trip | null>(null);
@@ -141,7 +175,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     try {
       setVehSubmitting(true);
       if (editingVehicle.id) {
-        await updateVehicle(editingVehicle.id, editingVehicle);
+        await updateVehicle(editingVehicle.id, {
+          ...editingVehicle,
+          expectedDailyKm: editingVehicle.expectedDailyKm
+            ? Number(editingVehicle.expectedDailyKm)
+            : undefined,
+        });
         onSuccess(`Wagen ${editingVehicle.licensePlate} bijgewerkt!`);
       } else {
         await addVehicle({
@@ -152,6 +191,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           nickname: editingVehicle.nickname?.trim() || '',
           isActive: editingVehicle.isActive ?? true,
           lastKnownKm: Number(editingVehicle.lastKnownKm || 0),
+          expectedDailyKm: editingVehicle.expectedDailyKm
+            ? Number(editingVehicle.expectedDailyKm)
+            : undefined,
         });
         onSuccess(`Nieuwe wagen ${editingVehicle.licensePlate} toegevoegd!`);
       }
@@ -162,6 +204,80 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setVehError(err.message || 'Kon wagen niet opslaan.');
     } finally {
       setVehSubmitting(false);
+    }
+  };
+
+  // Tag & guideline settings handlers
+  const handleAddPurpose = async () => {
+    const trimmed = newPurposeInput.trim();
+    if (!trimmed) return;
+    if (purposesList.includes(trimmed)) {
+      alert('Dit ritdoel bestaat al.');
+      return;
+    }
+    const updated = [...purposesList, trimmed];
+    setPurposesList(updated);
+    setNewPurposeInput('');
+    try {
+      setSettingsSaving(true);
+      const res = await updateAppSettings({ purposes: updated });
+      if (onAppSettingsChange) onAppSettingsChange(res);
+      onSuccess(`Ritdoel "${trimmed}" toegevoegd!`);
+    } catch (e: any) {
+      alert('Kon ritdoel niet opslaan.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleRemovePurpose = async (tagToRemove: string) => {
+    if (purposesList.length <= 1) {
+      alert('Er moet minstens één ritdoel actief blijven.');
+      return;
+    }
+    const updated = purposesList.filter((t) => t !== tagToRemove);
+    setPurposesList(updated);
+    try {
+      setSettingsSaving(true);
+      const res = await updateAppSettings({ purposes: updated });
+      if (onAppSettingsChange) onAppSettingsChange(res);
+      onSuccess(`Ritdoel "${tagToRemove}" verwijderd.`);
+    } catch (e: any) {
+      alert('Kon ritdoel niet verwijderen.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleResetPurposes = async () => {
+    if (!confirm('Standaard ritdoelen herstellen?')) return;
+    try {
+      setSettingsSaving(true);
+      const res = await updateAppSettings({ purposes: DEFAULT_APP_SETTINGS.purposes });
+      setPurposesList(DEFAULT_APP_SETTINGS.purposes);
+      if (onAppSettingsChange) onAppSettingsChange(res);
+      onSuccess('Standaard ritdoelen hersteld!');
+    } catch (e: any) {
+      alert('Kon instellingen niet herstellen.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleSaveGuidelineKm = async () => {
+    if (isNaN(guidelineDailyKm) || guidelineDailyKm <= 0) {
+      alert('Voer een geldig getal in groter dan 0.');
+      return;
+    }
+    try {
+      setSettingsSaving(true);
+      const res = await updateAppSettings({ defaultExpectedDailyKm: Number(guidelineDailyKm) });
+      if (onAppSettingsChange) onAppSettingsChange(res);
+      onSuccess(`Standaard richtgetal ingesteld op ${guidelineDailyKm} km!`);
+    } catch (e: any) {
+      alert('Kon richtgetal niet opslaan.');
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -213,15 +329,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+
+    // Role hierarchy enforcement: fleet_admin cannot assign admin or edit admin users
+    if (!isSuperAdmin) {
+      if (editingUser.role === 'admin') {
+        alert('Als Wagen Administrator kan je de rol van Systeem Administrator (admin) niet toekennen.');
+        return;
+      }
+      const originalUser = profiles.find((p) => p.id === editingUser.id);
+      if (originalUser && originalUser.role === 'admin') {
+        alert('Als Wagen Administrator mag je de rechten van een Systeem Administrator niet wijzigen.');
+        return;
+      }
+    }
+
     try {
       setUserSubmitting(true);
-      await updateUserProfile(editingUser.id, editingUser);
+      await updateUserProfile(editingUser.id, editingUser, currentUser);
       onSuccess(`Gebruiker ${editingUser.fullName} bijgewerkt!`);
       setUserModalOpen(false);
       setEditingUser(null);
     } catch (err: any) {
       console.error('Error saving user profile:', err);
-      alert('Kon profiel niet bijwerken.');
+      alert(err.message || 'Kon profiel niet bijwerken.');
     } finally {
       setUserSubmitting(false);
     }
@@ -304,6 +434,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <Users className="w-4 h-4" />
           Gebruikers & Rollen ({profiles.length})
         </button>
+
+        {isFleetAdmin && (
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`py-3 px-4 font-semibold text-xs sm:text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
+              activeTab === 'settings'
+                ? 'border-stone-900 text-stone-900'
+                : 'border-transparent text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            <Sliders className="w-4 h-4" />
+            Ritdoelen & Richtgetal
+          </button>
+        )}
       </div>
 
       {/* TAB 1: OPENSTAANDE RITTEN (MANUAL CLOSURE) */}
@@ -368,6 +512,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <span className="text-stone-800 font-medium">{trip.purpose}</span>
                         </div>
                       </div>
+
+                      {/* Kilometer discrepancy alert for admin */}
+                      {trip.hasKmDiscrepancy && (
+                        <div className="mt-2.5 p-2 rounded-lg bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center gap-1.5 font-semibold">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>
+                            KM-sprong: {(trip.kmDiscrepancy || 0) > 0 ? '+' : ''}
+                            {trip.kmDiscrepancy} km t.o.v. vorige wagenstand
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <button
@@ -450,8 +605,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <td className="py-3 px-4 text-stone-700 whitespace-nowrap">
                           {team?.name || 'Onbekend team'}
                         </td>
-                        <td className="py-3 px-4 font-mono font-bold text-stone-900 whitespace-nowrap">
-                          {v.lastKnownKm.toLocaleString('nl-BE')} km
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="font-mono font-bold text-stone-900">
+                            {v.lastKnownKm.toLocaleString('nl-BE')} km
+                          </div>
+                          {v.expectedDailyKm ? (
+                            <div className="text-[10px] text-stone-500 font-sans">
+                              Richtgetal: {v.expectedDailyKm} km
+                            </div>
+                          ) : null}
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <span
@@ -465,6 +627,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setSelectedQrVehicle(v)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-semibold text-[11px] transition shadow-2xs mr-2"
+                            title="QR-code sticker bekijken of afdrukken"
+                          >
+                            <QrCode className="w-3.5 h-3.5 text-stone-200" />
+                            QR-code
+                          </button>
                           <button
                             onClick={() => {
                               setEditingVehicle(v);
@@ -669,16 +839,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </td>
                         {isFleetAdmin && (
                           <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => {
-                                setEditingUser(p);
-                                setUserModalOpen(true);
-                              }}
-                              className="p-1.5 text-stone-400 hover:text-stone-800 transition"
-                              title="Rol & Teams bewerken"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
+                            {p.role === 'admin' && !isSuperAdmin ? (
+                              <span
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-stone-400 bg-stone-100 px-2 py-1 rounded-lg cursor-not-allowed"
+                                title="Alleen een Systeem Administrator kan admin-accounts bewerken"
+                              >
+                                <Lock className="w-3 h-3 text-stone-400" />
+                                Beveiligd
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditingUser(p);
+                                  setUserModalOpen(true);
+                                }}
+                                className="p-1.5 text-stone-400 hover:text-stone-800 transition"
+                                title="Rol & Teams bewerken"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -686,6 +866,156 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TAB 5: RITDOELEN & RICHTGETAL BEHEREN */}
+      {activeTab === 'settings' && isFleetAdmin && (
+        <section aria-labelledby="admin-settings-heading" className="space-y-6">
+          <div>
+            <h2 id="admin-settings-heading" className="text-base font-bold text-stone-900">
+              Ritdoelen & Richtgetallen beheren
+            </h2>
+            <p className="text-xs text-stone-500">
+              Beheer de keuzelijst met ritdoelen (tags) voor medewerkers en configureer richtgetallen om typefouten in kilometerstanden tijdig te signaleren.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Card 1: Ritdoelen / Tags Beheren */}
+            <div className="bg-white rounded-2xl border border-stone-200 p-6 shadow-xs space-y-5">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-stone-100 text-stone-800">
+                    <Tag className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-900">Doelen van de rit (Tags)</h3>
+                    <p className="text-xs text-stone-500">
+                      Zichtbaar als snelle selectieknoppen bij het starten van een rit
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetPurposes}
+                  disabled={settingsSaving}
+                  title="Standaard herstellen"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-stone-500 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Standaard
+                </button>
+              </div>
+
+              {/* Add new tag input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newPurposeInput}
+                  onChange={(e) => setNewPurposeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPurpose();
+                    }
+                  }}
+                  placeholder="Nieuw ritdoel toevoegen (bv. Dringende koerierdienst)..."
+                  className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-stone-900 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddPurpose}
+                  disabled={!newPurposeInput.trim() || settingsSaving}
+                  className="px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs transition disabled:opacity-40 flex items-center gap-1.5 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Toevoegen
+                </button>
+              </div>
+
+              {/* Tag badges list */}
+              <div className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-stone-500 block">
+                  Actieve ritdoelen ({purposesList.length}):
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {purposesList.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-100 border border-stone-200 text-xs font-semibold text-stone-800 shadow-2xs group hover:bg-stone-200/80 transition"
+                    >
+                      <Tag className="w-3 h-3 text-stone-400" />
+                      <span>{tag}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePurpose(tag)}
+                        title={`Verwijder ${tag}`}
+                        className="ml-0.5 text-stone-400 hover:text-rose-600 transition"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2: Richtgetal kilometers & Afwijkingen */}
+            <div className="bg-white rounded-2xl border border-stone-200 p-6 shadow-xs space-y-5">
+              <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
+                <div className="p-2 rounded-xl bg-amber-100 text-amber-900">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">Controles & Richtgetallen</h3>
+                  <p className="text-xs text-stone-500">
+                    Signaleert afwijkingen (bv. 100 km ingeven als 30 km normaal is)
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1.5">
+                    Standaard richtgetal per rit/dag (KM)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="5"
+                      step="5"
+                      value={guidelineDailyKm}
+                      onChange={(e) => setGuidelineDailyKm(Number(e.target.value))}
+                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 font-mono font-bold text-sm focus:ring-2 focus:ring-stone-900 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveGuidelineKm}
+                      disabled={settingsSaving}
+                      className="px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs transition disabled:opacity-40 shrink-0"
+                    >
+                      {settingsSaving ? 'Opslaan...' : 'Opslaan'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-stone-500 mt-1.5 leading-relaxed">
+                    Indien een medewerker meer kilometers registreert dan dit richtgetal, krijgt hij/zij een vriendelijke controle-waarschuwing. De beheerder ziet dit ook duidelijk gemarkeerd in het logboek.
+                  </p>
+                </div>
+
+                {/* Explanation of KM discrepancy detection */}
+                <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-stone-900">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Automatische detectie van kilometer-sprongen</span>
+                  </div>
+                  <p className="text-stone-600 leading-relaxed text-[11px]">
+                    Als een nieuwe rit start met een kilometerstand die verschilt van de vorige afgesloten rit van die wagen (bijvoorbeeld door een vergeten rit of overgeslagen registratie), registreert het systeem dit verschil automatisch. De medewerker wordt hier niet door gehinderd, maar de beheerder ziet een duidelijk waarschuwingsicoon met het exacte aantal km afwijking in het rittenoverzicht.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -914,6 +1244,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
+                  Richtgetal kilometers per rit/dag <span className="text-stone-400 font-normal">(optioneel)</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={editingVehicle.expectedDailyKm || ''}
+                  onChange={(e) =>
+                    setEditingVehicle({
+                      ...editingVehicle,
+                      expectedDailyKm: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  placeholder="bv. 40 (waarschuwt bij overschrijding)"
+                  className="w-full font-mono px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-stone-900"
+                />
+                <p className="text-[11px] text-stone-500 mt-1">
+                  Als een bestuurder meer kilometers rijdt dan dit richtgetal, krijgt hij een controle-waarschuwing om typefouten te vermijden.
+                </p>
+              </div>
+
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
@@ -1061,21 +1413,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="text-xs text-stone-500">{editingUser.email}</div>
               </div>
 
+              {editingUser.role === 'admin' && !isSuperAdmin && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                  <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    Dit account is een <strong>Systeem Administrator</strong>. Een Wagen Administrator mag de rol of rechten van een admin niet wijzigen.
+                  </span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
                   Rol in WagenRit
                 </label>
                 <select
                   value={editingUser.role}
+                  disabled={!isSuperAdmin && editingUser.role === 'admin'}
                   onChange={(e) =>
                     setEditingUser({ ...editingUser, role: e.target.value as UserRole })
                   }
-                  className="w-full p-2.5 rounded-xl border border-stone-300 text-xs font-semibold bg-white"
+                  className="w-full p-2.5 rounded-xl border border-stone-300 text-xs font-semibold bg-white disabled:bg-stone-100 disabled:text-stone-500 disabled:cursor-not-allowed"
                 >
                   <option value="user">Gebruiker / Medewerker (Ritten starten/stoppen)</option>
                   <option value="fleet_admin">Wagen Administrator (Wagenpark & ritten beheren)</option>
-                  <option value="admin">Systeem Administrator (Teams, groepen & gebruikers beheren)</option>
+                  {isSuperAdmin && (
+                    <option value="admin">Systeem Administrator (Teams, groepen & gebruikers beheren)</option>
+                  )}
                 </select>
+                {!isSuperAdmin && (
+                  <p className="text-[11px] text-stone-500 mt-1">
+                    Als Wagen Administrator kun je medewerkers en wagenbeheerders instellen. Alleen een Systeem Administrator mag admin-rechten toekennen.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1131,7 +1500,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={userSubmitting}
+                  disabled={userSubmitting || (!isSuperAdmin && editingUser.role === 'admin')}
                   className="flex-1 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold transition disabled:opacity-50"
                 >
                   {userSubmitting ? 'Bezig...' : 'Gebruiker opslaan'}
@@ -1140,6 +1509,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* QR Code Modal for Vehicle */}
+      {selectedQrVehicle && (
+        <QRCodeModal
+          vehicle={selectedQrVehicle}
+          onClose={() => setSelectedQrVehicle(null)}
+        />
       )}
     </div>
   );

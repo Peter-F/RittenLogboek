@@ -27,6 +27,7 @@ export interface Vehicle {
   nickname?: string;
   isActive: boolean;
   lastKnownKm: number;
+  expectedDailyKm?: number; // Richtgetal km per rit / dag (bv. 50 km)
   createdAt: string;
 }
 
@@ -52,6 +53,12 @@ export interface Trip {
   closedReason?: string;
   closedByUserId?: string;
   closedByUserName?: string;
+  // Discrepancy checks for administrator visibility
+  kmDiscrepancy?: number; // startKm - previousTripEndKm (verschil met vorige stand)
+  hasKmDiscrepancy?: boolean;
+  // Richtgetal waarschuwing
+  isUnusualDistance?: boolean; // afstand > richtgetal
+  expectedTripKm?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,5 +90,12 @@ export interface NotificationSettings {
   id: string;
   userId: string;
   schedules: WeekdayReminder[];
+  updatedAt: string;
+}
+
+export interface AppSettings {
+  id: string;
+  purposes: string[];
+  defaultExpectedDailyKm: number;
   updatedAt: string;
 }

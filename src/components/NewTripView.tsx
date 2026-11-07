@@ -12,18 +12,20 @@ import {
   Building,
   Clock,
 } from 'lucide-react';
-import { startNewTrip } from '../services/tripService';
+import { startNewTrip, getLatestVehicleMileage } from '../services/tripService';
 
 interface NewTripViewProps {
   vehicles: Vehicle[];
   openTrips: Trip[];
   teams: Team[];
   currentUser: UserProfile;
+  initialVehicleId?: string;
+  availablePurposes?: string[];
   onSuccess: (message: string) => void;
   onCancel: () => void;
 }
 
-const COMMON_PURPOSES = [
+const DEFAULT_FALLBACK_PURPOSES = [
   'Klantbezoek',
   'Werkplaats',
   'Materiaal ophalen',
@@ -44,11 +46,18 @@ export const NewTripView: React.FC<NewTripViewProps> = ({
   openTrips,
   teams,
   currentUser,
+  initialVehicleId,
+  availablePurposes,
   onSuccess,
   onCancel,
 }) => {
   const isSuperAdmin = currentUser.role === 'admin';
   const userTeamIds = currentUser.teamIds || [];
+
+  const purposeOptions =
+    availablePurposes && availablePurposes.length > 0
+      ? availablePurposes
+      : DEFAULT_FALLBACK_PURPOSES;
 
   // Filter vehicles: regular users only see vehicles from their assigned teams
   const userVisibleVehicles = isSuperAdmin
@@ -61,7 +70,7 @@ export const NewTripView: React.FC<NewTripViewProps> = ({
 
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(
-    userVisibleVehicles[0]?.id || ''
+    initialVehicleId || userVisibleVehicles[0]?.id || ''
   );
 
   const filteredVehicles =
@@ -80,7 +89,8 @@ export const NewTripView: React.FC<NewTripViewProps> = ({
   const isOpenBySelf =
     existingOpenTrip && existingOpenTrip.userId === currentUser.id;
 
-  const [startKm, setStartKm] = useState<number>(selectedVehicle?.lastKnownKm || 0);
+  const currentVehicleKm = getLatestVehicleMileage(selectedVehicle, openTrips);
+  const [startKm, setStartKm] = useState<number>(currentVehicleKm);
   const [startTimeLocal, setStartTimeLocal] = useState<string>(getNowLocalString());
   const [purpose, setPurpose] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -96,12 +106,12 @@ export const NewTripView: React.FC<NewTripViewProps> = ({
     setStartTimeLocal(getNowLocalString(d));
   };
 
-  // Sync startKm when selectedVehicle changes
+  // Sync startKm when selectedVehicle or openTrips changes
   useEffect(() => {
     if (selectedVehicle) {
-      setStartKm(selectedVehicle.lastKnownKm || 0);
+      setStartKm(getLatestVehicleMileage(selectedVehicle, openTrips));
     }
-  }, [selectedVehicleId, selectedVehicle]);
+  }, [selectedVehicleId, selectedVehicle, openTrips]);
 
   // Keep selectedVehicleId valid if vehicles change
   useEffect(() => {
@@ -504,7 +514,7 @@ export const NewTripView: React.FC<NewTripViewProps> = ({
                 required
               />
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {COMMON_PURPOSES.map((chip) => (
+                {purposeOptions.map((chip) => (
                   <button
                     key={chip}
                     type="button"

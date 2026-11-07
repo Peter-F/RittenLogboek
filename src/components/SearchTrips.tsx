@@ -17,6 +17,7 @@ import {
   ArrowUpDown,
   ListFilter,
   CalendarDays,
+  AlertTriangle,
 } from 'lucide-react';
 import { exportTripsToCSV } from '../services/tripService';
 
@@ -52,6 +53,7 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [onlyAnomalies, setOnlyAnomalies] = useState(false);
 
   // Vehicles visible to current user (users only see vehicles of their assigned teams)
   const userTeamIds = currentUser.teamIds || [];
@@ -121,6 +123,11 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
           return false;
         }
 
+        // Anomaly / Warning filter
+        if (onlyAnomalies && !trip.hasKmDiscrepancy && !trip.isUnusualDistance) {
+          return false;
+        }
+
         return true;
       })
       .sort((a, b) => {
@@ -138,6 +145,7 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
     startDate,
     endDate,
     sortOrder,
+    onlyAnomalies,
     isFleetAdminOrAbove,
     currentUser.id,
     userTeamIds,
@@ -152,11 +160,19 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
     setStartDate('');
     setEndDate('');
     setSortOrder('desc');
+    setOnlyAnomalies(false);
   };
 
   const handleExport = () => {
     const today = new Date().toISOString().split('T')[0];
-    exportTripsToCSV(filteredTrips, `ritten_export_${today}.csv`);
+    const userSlug = (currentUser.fullName || 'gebruiker')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]/g, '_');
+    const filename = isFleetAdminOrAbove
+      ? `ritten_export_${today}.csv`
+      : `mijn_ritten_${userSlug}_${today}.csv`;
+    exportTripsToCSV(filteredTrips, filename);
   };
 
   const totalFilteredKm = filteredTrips.reduce((acc, t) => {
@@ -181,30 +197,42 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
           </p>
         </div>
 
-        {/* View mode toggle */}
-        <div className="inline-flex p-1 bg-white border border-stone-200 rounded-xl shadow-xs self-start sm:self-auto">
+        {/* View mode toggle & Quick CSV Export button for active user */}
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
-            onClick={() => setViewMode('day')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
-              viewMode === 'day'
-                ? 'bg-stone-900 text-white shadow-xs'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
+            onClick={handleExport}
+            disabled={filteredTrips.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800 disabled:opacity-40 transition shadow-xs"
+            title="Exporteer de gefilterde ritten naar een CSV-bestand"
           >
-            <CalendarDays className="w-3.5 h-3.5" />
-            Dagoverzicht
+            <Download className="w-3.5 h-3.5" />
+            {isFleetAdminOrAbove ? 'Exporteer CSV' : 'Exporteer mijn ritten'} ({filteredTrips.length})
           </button>
-          <button
-            onClick={() => setViewMode('custom')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
-              viewMode === 'custom'
-                ? 'bg-stone-900 text-white shadow-xs'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <ListFilter className="w-3.5 h-3.5" />
-            Uitgebreid zoeken
-          </button>
+
+          <div className="inline-flex p-1 bg-white border border-stone-200 rounded-xl shadow-xs">
+            <button
+              onClick={() => setViewMode('day')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
+                viewMode === 'day'
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <CalendarDays className="w-3.5 h-3.5" />
+              Dagoverzicht
+            </button>
+            <button
+              onClick={() => setViewMode('custom')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
+                viewMode === 'custom'
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <ListFilter className="w-3.5 h-3.5" />
+              Uitgebreid zoeken
+            </button>
+          </div>
         </div>
       </div>
 
@@ -226,16 +254,15 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
               <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
                 Filteropties
               </span>
-              {isFleetAdminOrAbove && (
-                <button
-                  onClick={handleExport}
-                  disabled={filteredTrips.length === 0}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800 disabled:opacity-40 transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Exporteer CSV ({filteredTrips.length})
-                </button>
-              )}
+              <button
+                onClick={handleExport}
+                disabled={filteredTrips.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800 disabled:opacity-40 transition"
+                title="Exporteer gefilterde ritten naar CSV"
+              >
+                <Download className="w-3.5 h-3.5" />
+                {isFleetAdminOrAbove ? 'Exporteer CSV' : 'Exporteer mijn ritten'} ({filteredTrips.length})
+              </button>
             </div>
 
             {/* Search bar */}
@@ -386,19 +413,43 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Anomaly filter toggle */}
+            <div className="pt-2 border-t border-stone-100 flex items-center justify-end">
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={onlyAnomalies}
+                  onChange={(e) => setOnlyAnomalies(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-amber-600 focus:ring-amber-500"
+                />
+                <span className="flex items-center gap-1 text-stone-700">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  Enkel ritten met KM-afwijking of &gt; richtgetal
+                </span>
+              </label>
+            </div>
           </div>
 
           {/* Summary statistics bar */}
-          <div className="flex items-center justify-between px-2 text-xs text-stone-500 font-medium">
-            <span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-2 text-xs text-stone-500 font-medium">
+            <div>
               Gevonden resultaten: <strong className="text-stone-900">{filteredTrips.length}</strong> ritten
-            </span>
-            <span>
-              Totale afstand:{' '}
-              <strong className="text-stone-900 font-mono">
-                {totalFilteredKm.toLocaleString('nl-BE')} km
-              </strong>
-            </span>
+              {filteredTrips.length > 0 && (
+                <span className="ml-2">
+                  (Totale afstand: <strong className="text-stone-900 font-mono">{totalFilteredKm.toLocaleString('nl-BE')} km</strong>)
+                </span>
+              )}
+            </div>
+            {filteredTrips.length > 0 && (
+              <button
+                onClick={handleExport}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-700 hover:text-stone-950 hover:underline self-start sm:self-auto transition"
+              >
+                <Download className="w-3.5 h-3.5 text-stone-600" />
+                <span>Exporteer selectie naar CSV ({filteredTrips.length})</span>
+              </button>
+            )}
           </div>
 
           {/* Results Table */}
@@ -463,13 +514,24 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
                               {trip.userName}
                             </td>
                             <td className="py-3 px-4 font-mono text-stone-600">
-                              {trip.startKm.toLocaleString('nl-BE')}
+                              <div>{trip.startKm.toLocaleString('nl-BE')}</div>
+                              {trip.hasKmDiscrepancy && isFleetAdminOrAbove && (
+                                <div className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300 mt-0.5 inline-block whitespace-nowrap">
+                                  ⚠️ Sprong: {(trip.kmDiscrepancy || 0) > 0 ? '+' : ''}
+                                  {trip.kmDiscrepancy} km
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-4 font-mono text-stone-600">
                               {trip.endKm ? trip.endKm.toLocaleString('nl-BE') : '—'}
                             </td>
-                            <td className="py-3 px-4 font-mono font-bold text-stone-900">
-                              {kmCount !== null ? `${kmCount.toLocaleString('nl-BE')} km` : 'Open'}
+                            <td className="py-3 px-4 font-mono font-bold text-stone-900 whitespace-nowrap">
+                              <div>{kmCount !== null ? `${kmCount.toLocaleString('nl-BE')} km` : 'Open'}</div>
+                              {trip.isUnusualDistance && (
+                                <div className="text-[10px] font-bold text-rose-800 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 mt-0.5 inline-block font-sans whitespace-nowrap">
+                                  ⚠️ &gt; {trip.expectedTripKm || 50} km
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-4 text-stone-800 max-w-xs">
                               <div className="truncate font-medium">{trip.purpose}</div>
@@ -543,6 +605,23 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
                         <div className="text-xs text-stone-400 font-mono">
                           KM: {trip.startKm} → {trip.endKm || '...'}
                         </div>
+
+                        {trip.hasKmDiscrepancy && isFleetAdminOrAbove && (
+                          <div className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>
+                              KM-sprong start: {(trip.kmDiscrepancy || 0) > 0 ? '+' : ''}
+                              {trip.kmDiscrepancy} km
+                            </span>
+                          </div>
+                        )}
+
+                        {trip.isUnusualDistance && (
+                          <div className="text-[11px] font-bold text-rose-900 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>Afstand &gt; richtgetal ({trip.expectedTripKm || 50} km)</span>
+                          </div>
+                        )}
 
                         {trip.closedReason && (
                           <p className="text-[11px] text-blue-700 bg-blue-50 p-1.5 rounded">

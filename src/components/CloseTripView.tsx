@@ -13,6 +13,7 @@ import { closeTrip } from '../services/tripService';
 
 interface CloseTripViewProps {
   trip: Trip;
+  expectedDailyKm?: number;
   onSuccess: (message: string) => void;
   onCancel: () => void;
 }
@@ -26,6 +27,7 @@ function getNowLocalString(date: Date = new Date()): string {
 
 export const CloseTripView: React.FC<CloseTripViewProps> = ({
   trip,
+  expectedDailyKm,
   onSuccess,
   onCancel,
 }) => {
@@ -94,6 +96,7 @@ export const CloseTripView: React.FC<CloseTripViewProps> = ({
         endKm: Number(endKm),
         endTime: parsedEndTime.toISOString(),
         notes: notes.trim(),
+        expectedDailyKm,
       });
       onSuccess(`Rit succesvol afgesloten! Totaal gereden: ${drivenDistance.toLocaleString('nl-BE')} km.`);
     } catch (err: any) {
@@ -280,6 +283,19 @@ export const CloseTripView: React.FC<CloseTripViewProps> = ({
             </div>
             <Gauge className="w-8 h-8 text-emerald-600 opacity-80" />
           </div>
+
+          {/* Guideline distance check (richtgetal) */}
+          {isDistanceValid && drivenDistance > (expectedDailyKm || 50) && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-2.5 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-semibold block text-amber-950">
+                  Opgelet: Mogelijke typefout in de kilometerstand?
+                </strong>
+                De berekende afstand van <strong>{drivenDistance.toLocaleString('nl-BE')} km</strong> ligt aanzienlijk hoger dan het richtgetal ({expectedDailyKm || 50} km). Controleer of de ingevoerde stopkilometerstand ({endKm.toLocaleString('nl-BE')} km) overeenkomt met het dashboard in de wagen. Indien dit klopt, mag je de rit gewoon afsluiten.
+              </div>
+            </div>
+          )}
 
           {/* Notes */}
           <div>

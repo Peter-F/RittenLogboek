@@ -55,17 +55,38 @@ Per wagen mag er in het systeem te allen tijde slechts **één openstaande rit**
 - Medewerkers zien uitsluitend de bedrijfswagens van de teams/afdelingen waaraan zij zijn toegewezen.
 - Medewerkers kunnen aan één of meerdere teams worden gekoppeld.
 
+### 5. QR-code per Wagen (Stickers scannen)
+- Voor elke wagen in het wagenpark kan de beheerder met één klik een **QR-code sticker** genereren en downloaden of afdrukken.
+- De QR-code wordt in de wagen gekleefd (op dashboard of ruit).
+- Wanneer een medewerker de QR-code met zijn smartphone scant:
+  - Indien de medewerker al een openstaande rit heeft voor die wagen: opent direct het scherm om de rit **direct af te sluiten**.
+  - Indien er nog geen rit actief is: opent direct het scherm om een **nieuwe rit te starten** met die wagen vooraf geselecteerd.
+
+### 6. Configureerbare Ritdoelen (Tags)
+- Beheerders kunnen via het tabblad **Ritdoelen & Richtgetal** naar wens tags toevoegen, bewerken, verwijderen of resetten naar de standaardlijst.
+- Wijzigingen zijn onmiddellijk realtime beschikbaar voor alle medewerkers als snelle touch-knoppen bij het starten van een rit.
+
+### 7. Detectie van Kilometer-afwijkingen (KM-sprongen)
+- Als een rit start met een kilometerstand die verschilt van de vorige afgesloten stand van die wagen (bijv. door een vergeten rit of overgeslagen registratie), detecteert het systeem dit verschil automatisch.
+- **Geen hinder voor de gebruiker:** de medewerker kan gewoon vertrekken en hoeft zich geen zorgen te maken.
+- **Zichtbaar voor de beheerder:** in het dagoverzicht, zoekscherm en beheerpaneel wordt een duidelijke waarschuwing getoond met het exacte aantal kilometers afwijking.
+
+### 8. Richtgetal dagelijkse kilometers (Typefout-preventie)
+- Zowel organisatie-breed als per specifieke wagen kan een richtgetal (bv. 50 km) worden ingesteld.
+- Als een medewerker per ongeluk een typefout maakt bij het afsluiten (bijv. 100 km ingeeft terwijl 30 km gebruikelijk is), toont de app direct een vriendelijke waarschuwingsbanner ter controle.
+- Ook beheerders kunnen in het overzicht filteren op ritten die het richtgetal overschrijden.
+
 ---
 
-## Rollen & Bevoegdheden
+## Rollen & Bevoegdheden (Strikte Hiërarchie)
 
-Het systeem kent 3 duidelijk gescheiden rollen:
+Het systeem hanteert een strikte rolhiërarchie: **Gebruiker < Wagen Administrator < Systeem Administrator**:
 
 | Rol | Rechten & Mogelijkheden |
 |---|---|
-| **1. Medewerker / Bestuurder** (`user`) | - Inloggen via Google Account of gastprofiel<br>- Ziet enkel actieve wagens van de eigen toegewezen teams<br>- Nieuwe rit starten met starttijd, startkm en ritdoel<br>- Eigen openstaande rit direct afsluiten met stopkm<br>- Dagelijkse kilometerstanden invoeren (ochtend/avond)<br>- Eigen rithistoriek en gereden kilometers raadplegen<br>- Persoonlijke wekelijkse herinneringen instellen |
-| **2. Wagen Administrator** (`fleet_admin`) | - Alle rechten van een medewerker<br>- Wagens van het wagenpark beheren (toevoegen, bewerken, activeren/deactiveren)<br>- Openstaande ritten inzien en vergeten ritten handmatig afsluiten met stopkm, stoptijd en reden<br>- Dagelijks daglogboek raadplegen (alle ritten van een gekozen datum)<br>- Volledig rittenoverzicht met filters doorzoeken en exporteren naar CSV<br>- Medewerkers toewijzen aan wagenparken |
-| **3. Systeem / Groeps-Administrator** (`admin`) | - Alle rechten van een Wagen Administrator<br>- Aparte groepen en teams definiëren (bijv. *Bouw & Montage*, *Service & Onderhoud*, *Centraal Wagenpark*)<br>- Wagens toewijzen aan specifieke groepen/teams<br>- Rollen toekennen aan gebruikers (`user`, `fleet_admin`, `admin`)<br>- Volledig overzicht over alle wagenparken van de organisatie |
+| **1. Medewerker / Bestuurder** (`user`) | - Inloggen via Google Account of gastprofiel<br>- Ziet enkel actieve wagens van de eigen toegewezen teams<br>- Nieuwe rit starten met starttijd, startkm en ritdoel<br>- Eigen openstaande rit direct afsluiten met stopkm<br>- Dagelijkse kilometerstanden invoeren (ochtend/avond)<br>- Eigen rithistoriek en daglogboeken raadplegen<br>- **Eigen gefilterde ritten direct exporteren naar CSV** in het zoekscherm<br>- Persoonlijke wekelijkse herinneringen instellen |
+| **2. Wagen Administrator** (`fleet_admin`) | - Alle rechten van een medewerker<br>- Wagens van het wagenpark beheren (toevoegen, bewerken, activeren/deactiveren, QR-code stickers genereren)<br>- Openstaande ritten inzien en vergeten ritten handmatig afsluiten met stopkm, stoptijd en reden<br>- Dagelijks daglogboek raadplegen (alle ritten van een gekozen datum)<br>- Volledig rittenoverzicht met geavanceerde filters doorzoeken en exporteren naar CSV<br>- Medewerkers koppelen aan wagenparken en rollen toekennen tot niveau `fleet_admin`<br>- **Veiligheidsbeperking:** Een Wagen Administrator mag **nooit** de rechten van een `admin` (Systeem Administrator) toekennen, intrekken of wijzigen. |
+| **3. Systeem Administrator** (`admin`) | - Alle rechten van een Wagen Administrator<br>- Aparte groepen en teams definiëren (bijv. *Bouw & Montage*, *Service & Onderhoud*, *Centraal Wagenpark*)<br>- Wagens toewijzen aan specifieke groepen/teams<br>- Als enige de rol `admin` (Systeem Administrator) toekennen of intrekken<br>- Volledig overzicht en beheer over alle wagenparken en profielen van de organisatie |
 
 ---
 
@@ -187,10 +208,11 @@ npm run lint
 ### Collecties in Firestore
 - `profiles/{userId}`: Gebruikersprofielen met `fullName`, `email`, `role` (`user` \| `fleet_admin` \| `admin`), `teamIds` (array van strings) en `isActive`.
 - `teams/{teamId}`: Teams en afdelingen met `name`, `description` en `isActive`.
-- `vehicles/{vehicleId}`: Wagenpark met `teamId`, `licensePlate`, `brand`, `model`, `nickname`, `lastKnownKm` en `isActive`.
-- `trips/{tripId}`: Rittenlogboek met `vehicleId`, `userId`, `startTime`, `startKm`, `endTime`, `endKm`, `purpose`, `status` (`open` \| `closed` \| `auto_closed`), `closedAutomatically`, `closedReason` en timestamps.
+- `vehicles/{vehicleId}`: Wagenpark met `teamId`, `licensePlate`, `brand`, `model`, `nickname`, `lastKnownKm`, `expectedDailyKm` (richtgetal) en `isActive`.
+- `trips/{tripId}`: Rittenlogboek met `vehicleId`, `userId`, `startTime`, `startKm`, `endTime`, `endKm`, `purpose`, `status` (`open` \| `closed` \| `auto_closed`), `closedAutomatically`, `closedReason`, `kmDiscrepancy`, `hasKmDiscrepancy`, `isUnusualDistance`, `expectedTripKm` en timestamps.
 - `daily_readings/{readingId}`: Dagelijkse kilometerstand-controles (`start` of `stop`).
 - `notification_settings/{userId}`: Wekelijkse herinneringstijden per weekdag.
+- `app_settings/{settingId}`: Globale instellingen inclusief configureerbare doelen (tags) en standaard richtgetal dagelijkse kilometers.
 
 ### Beveiliging
 De Firestore-database wordt beschermd door beveiligingsregels in `firestore.rules`. Alleen geverifieerde verzoeken worden verwerkt, en beheeracties (zoals teamcreatie of gebruikersrechten) zijn voorbehouden aan beheerders.
