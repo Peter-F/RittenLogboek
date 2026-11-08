@@ -10,12 +10,26 @@ import {
   AlertTriangle,
   Save,
   Plus,
+  Smartphone,
+  Send,
+  Info,
+  ShieldCheck,
+  BellRing,
 } from 'lucide-react';
 import {
   saveDailyReading,
   saveNotificationSettings,
   getNotificationSettings,
 } from '../services/tripService';
+import {
+  getNotificationPermissionStatus,
+  requestNotificationPermission,
+  sendDepartureReminder,
+  sendServerTestPush,
+  syncSchedulesWithServer,
+  subscribeDeviceToPushServer,
+  PushPermissionStatus,
+} from '../services/notificationService';
 
 interface DailyRegistrationProps {
   user: UserProfile;
@@ -50,17 +64,54 @@ export const DailyRegistration: React.FC<DailyRegistrationProps> = ({
   // Notification schedules
   const [schedules, setSchedules] = useState<WeekdayReminder[]>([]);
   const [savingReminders, setSavingReminders] = useState(false);
+  const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('default');
+  const [testingPush, setTestingPush] = useState(false);
 
-  // Load reminders
+  // Load reminders & check push permission
   useEffect(() => {
     let mounted = true;
     getNotificationSettings(user.id).then((sched) => {
       if (mounted) setSchedules(sched);
     });
+    setPushStatus(getNotificationPermissionStatus());
     return () => {
       mounted = false;
     };
   }, [user.id]);
+
+  const handleRequestPush = async () => {
+    const status = await requestNotificationPermission(user.id, schedules);
+    setPushStatus(status);
+    if (status === 'granted') {
+      await subscribeDeviceToPushServer(user.id, schedules);
+      onSuccess('Pushmeldingen succesvol gekoppeld aan de 24/7 achtergrondservice!');
+    } else if (status === 'denied') {
+      setReadingError('Meldingen zijn geblokkeerd in de browser. Pas dit aan in je browserinstellingen.');
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    setTestingPush(true);
+    try {
+      if (pushStatus !== 'granted') {
+        const status = await requestNotificationPermission(user.id, schedules);
+        setPushStatus(status);
+        if (status !== 'granted') {
+          onSuccess('Geef eerst toestemming om pushmeldingen te ontvangen.');
+          return;
+        }
+      }
+      const sent = await sendServerTestPush(user.id);
+      if (sent) {
+        onSuccess('Testmelding via achtergrondservice verstuurd: "Tijd voor vertrek! Vergeet je startkilometerstand voor je gebruikte wagen niet te noteren."');
+      } else {
+        onSuccess('Melding kon niet worden verzonden. Controleer je notificatie-instellingen.');
+      }
+    } finally {
+      setTestingPush(false);
+    }
+  };
+
 
   // Set default km from selected vehicle
   const selectedVehicle = activeVehicles.find((v) => v.id === selectedVehicleId);
@@ -133,7 +184,11 @@ export const DailyRegistration: React.FC<DailyRegistrationProps> = ({
     try {
       setSavingReminders(true);
       await saveNotificationSettings(user.id, schedules);
-      onSuccess('Herinneringsinstellingen succesvol opgeslagen!');
+      await syncSchedulesWithServer(user.id, schedules);
+      if (pushStatus === 'granted') {
+        await subscribeDeviceToPushServer(user.id, schedules);
+      }
+      onSuccess('Herinneringsinstellingen succesvol opgeslagen en gesynchroniseerd met de 24/7 achtergrondservice!');
     } catch (err) {
       console.error('Error saving notification settings:', err);
     } finally {
@@ -331,6 +386,88 @@ export const DailyRegistration: React.FC<DailyRegistrationProps> = ({
           <p className="text-xs text-stone-500 leading-relaxed">
             Stel herinneringstijden in om 's ochtends de vertrekstand en 's avonds de stopstand van de wagen niet te vergeten.
           </p>
+
+          {/* Push Notificaties Status & Test paneel */}
+          <div className="p-4 rounded-xl border border-stone-200 bg-stone-50 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BellRing className="w-4 h-4 text-stone-800" />
+                <div>
+                  <span className="text-xs font-bold text-stone-900 block">
+                    Mobiele Push Notificaties
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    24/7 Server Achtergrondservice actief
+                  </span>
+                </div>
+              </div>
+              <div>
+                {pushStatus === 'granted' ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Gekoppeld aan gsm
+                  </span>
+                ) : pushStatus === 'denied' ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Geblokkeerd
+                  </span>
+                ) : pushStatus === 'unsupported' ? (
+                  <span className="text-[11px] font-semibold text-stone-500 bg-stone-200 px-2 py-0.5 rounded-full">
+                    Niet ondersteund
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full">
+                    <Clock className="w-3.5 h-3.5" />
+                    Toestel nog koppelen
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Inschakelknop als nog niet granted */}
+            {pushStatus !== 'granted' && pushStatus !== 'unsupported' && (
+              <button
+                type="button"
+                onClick={handleRequestPush}
+                className="w-full py-2.5 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-2"
+              >
+                <Smartphone className="w-4 h-4" />
+                Pushmeldingen inschakelen op dit toestel
+              </button>
+            )}
+
+            {/* Test knop & Preview van de exacte tekst */}
+            <div className="pt-2 border-t border-stone-200/80 space-y-2">
+              <div className="text-[11px] text-stone-600 bg-white p-2.5 rounded-lg border border-stone-200 shadow-2xs">
+                <span className="font-semibold text-stone-800 block mb-0.5">
+                  Berichtvoorbeeld bij vertrektijd:
+                </span>
+                <span className="italic text-stone-700">
+                  &ldquo;Tijd voor vertrek! Vergeet je startkilometerstand voor je gebruikte wagen niet te noteren.&rdquo;
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSendTestPush}
+                disabled={testingPush}
+                className="w-full py-2.5 px-3 rounded-xl border border-stone-300 hover:bg-white text-stone-800 font-semibold text-xs shadow-xs transition flex items-center justify-center gap-2 active:scale-[0.99]"
+              >
+                <Send className="w-3.5 h-3.5 text-stone-600" />
+                {testingPush ? 'Verzenden...' : 'Stuur testmelding naar mijn gsm'}
+              </button>
+            </div>
+
+            {/* Smartphone installatie gids */}
+            <div className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 flex items-start gap-2">
+              <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <strong>iPhone (iOS 16.4+) tip:</strong> Tik in Safari onderaan op het <strong>&lsquo;Deel&rsquo;</strong> icoon (vierkantje met pijl omhoog) en kies <strong>&lsquo;Zet op beginscherm&rsquo;</strong>. Open vervolgens de app vanaf je beginscherm om meldingen te ontvangen.
+              </div>
+            </div>
+          </div>
 
           <div className="space-y-2.5">
             {schedules.map((schedule) => (

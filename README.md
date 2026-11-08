@@ -76,6 +76,21 @@ Per wagen mag er in het systeem te allen tijde slechts **één openstaande rit**
 - Als een medewerker per ongeluk een typefout maakt bij het afsluiten (bijv. 100 km ingeeft terwijl 30 km gebruikelijk is), toont de app direct een vriendelijke waarschuwingsbanner ter controle.
 - Ook beheerders kunnen in het overzicht filteren op ritten die het richtgetal overschrijden.
 
+### 9. Module Vervoer Zoeken (Collega's Oppikken)
+- **Aan- en uitschakelbaar:** De beheerder kan deze module naar wens in- of uitschakelen via het Beheerpaneel (Instellingen).
+- **Vervoer zoeken knop:** Naast "Nieuwe rit" verschijnt de knop "Vervoer zoeken".
+- **Formulierinvoer:**
+  - *Waar je nu bent (vertreklocatie):* dropdown met dezelfde ritdoelen/locaties als de ritten, inclusief optie voor vrije tekstinvoer.
+  - *Naar waar je moet (bestemming):* dropdown met dezelfde ritdoelen/locaties + optie voor vrije invoer.
+  - *Materiaal meevervoeren:* vinkje *"Ik heb materiaal bij dat mee vervoerd moet worden"*, zodat chauffeurs weten dat er koffers of gereedschap meemoeten.
+- **Pushmelding naar actieve chauffeurs:**
+  - Iedereen die op dat moment een wagen in bezit heeft (`open rit`), ontvangt direct een gerichte pushmelding.
+  - Bij het openen van de melding belandt de chauffeur op de ophaalpagina met route- en materiaalgegevens.
+  - **Aankomsttijd (ETA) selectie:** Keuze uit snelle knoppen voor **5m**, **10m**, **15m** of een **eigen waarde** in minuten.
+- **Bevestiging & automatische herhaling:**
+  - Zodra een chauffeur accepteert, ontvangt de aanvrager direct een pushmelding met de naam van de chauffeur, nummerplaat, wagen en de geschatte aankomsttijd.
+  - **5-minuten timer:** Indien niemand reageert, stuurt de achtergrondservice na 5 minuten automatisch een herinneringspushmelding naar de chauffeurs totdat er vervoer is gevonden.
+
 ---
 
 ## Rollen & Bevoegdheden (Strikte Hiërarchie)
@@ -85,8 +100,8 @@ Het systeem hanteert een strikte rolhiërarchie: **Gebruiker < Wagen Administrat
 | Rol | Rechten & Mogelijkheden |
 |---|---|
 | **1. Medewerker / Bestuurder** (`user`) | - Inloggen via Google Account of gastprofiel<br>- Ziet enkel actieve wagens van de eigen toegewezen teams<br>- Nieuwe rit starten met starttijd, startkm en ritdoel<br>- Eigen openstaande rit direct afsluiten met stopkm<br>- Dagelijkse kilometerstanden invoeren (ochtend/avond)<br>- Eigen rithistoriek en daglogboeken raadplegen<br>- **Eigen gefilterde ritten direct exporteren naar CSV** in het zoekscherm<br>- Persoonlijke wekelijkse herinneringen instellen |
-| **2. Wagen Administrator** (`fleet_admin`) | - Alle rechten van een medewerker<br>- Wagens van het wagenpark beheren (toevoegen, bewerken, activeren/deactiveren, QR-code stickers genereren)<br>- Openstaande ritten inzien en vergeten ritten handmatig afsluiten met stopkm, stoptijd en reden<br>- Dagelijks daglogboek raadplegen (alle ritten van een gekozen datum)<br>- Volledig rittenoverzicht met geavanceerde filters doorzoeken en exporteren naar CSV<br>- Medewerkers koppelen aan wagenparken en rollen toekennen tot niveau `fleet_admin`<br>- **Veiligheidsbeperking:** Een Wagen Administrator mag **nooit** de rechten van een `admin` (Systeem Administrator) toekennen, intrekken of wijzigen. |
-| **3. Systeem Administrator** (`admin`) | - Alle rechten van een Wagen Administrator<br>- Aparte groepen en teams definiëren (bijv. *Bouw & Montage*, *Service & Onderhoud*, *Centraal Wagenpark*)<br>- Wagens toewijzen aan specifieke groepen/teams<br>- Als enige de rol `admin` (Systeem Administrator) toekennen of intrekken<br>- Volledig overzicht en beheer over alle wagenparken en profielen van de organisatie |
+| **2. Wagen Administrator** (`fleet_admin`) | - Alle rechten van een medewerker<br>- **Strikte team-afscherming:** Heeft **enkel toegang tot de wagens en ritten van zijn eigen team(s)**. Kan geen wagens of ritten van andere teams inkijken of beheren.<br>- Wagens van het eigen team beheren (toevoegen, bewerken, activeren/deactiveren, QR-code stickers genereren)<br>- Openstaande ritten van het eigen team inzien en vergeten ritten handmatig afsluiten met stopkm, stoptijd en reden<br>- Dagelijks daglogboek raadplegen voor de eigen teamwagens<br>- Gefilterde ritten van het eigen team exporteren naar CSV<br>- Medewerkers koppelen aan de eigen teams en rollen beheren tot niveau `fleet_admin`<br>- **Veiligheidsbeperking:** Een Wagen Administrator mag **nooit** de rechten van een `admin` (Systeem Administrator) toekennen, intrekken of wijzigen. |
+| **3. Systeem Administrator** (`admin`) | - Alle rechten van een Wagen Administrator<br>- **Exclusieve globale toegang:** Als **enige rol** bevoegd om alle wagens, teams en ritten van de gehele organisatie in te kijken en te beheren.<br>- Aparte groepen en teams definiëren (bijv. *Bouw & Montage*, *Service & Onderhoud*, *Centraal Wagenpark*)<br>- Wagens toewijzen en herverdelen over alle teams<br>- Als enige de rol `admin` (Systeem Administrator) toekennen of intrekken<br>- Volledig overzicht en beheer over alle wagenparken en profielen van de organisatie |
 
 ---
 
@@ -103,6 +118,9 @@ Het systeem hanteert een strikte rolhiërarchie: **Gebruiker < Wagen Administrat
   - Beveiligingsregels via `firestore.rules`
 - **Authenticatie:** Firebase Authentication met Google Identity Provider (Google OAuth)
 - **Data Export:** CSV-exporteur met UTF-8 BOM ondersteuning voor Microsoft Excel
+- **Full-stack Backend & Achtergrondservice (Stap 2):** Node.js, Express, `web-push` met VAPID-authenticatie
+  - 24/7 Server Cron ticker (Europe/Brussels) die ingestelde herinneringen controleert
+  - Directe push naar Apple (APNs) en Google (FCM) push-servers, ook wanneer de smartphone vergrendeld is en de browser gesloten
 
 ---
 
@@ -171,9 +189,16 @@ npm run lint
 5. Vul eventueel een opmerking in (bijv. *"Wagen getankt"*).
 6. Klik op **Rit direct afsluiten**. De rit wordt onmiddellijk opgeslagen en de wagen is direct beschikbaar voor de volgende collega.
 
-### Dagregistratie & Herinneringen
+### Dagregistratie & Herinneringen (Mobiele Pushberichten)
 - Onder het tabblad **Dagstand** kun je dagelijks een beginstand (ochtend) of eindstand (avond) vastleggen.
-- Stel persoonlijke herinneringen in per weekdag (bijvoorbeeld maandag t/m vrijdag om 07:30 en 17:30).
+- **Wekelijkse Pushmeldingen naar je gsm:**
+  - Stel persoonlijke herinneringen in per weekdag (bijvoorbeeld maandag t/m vrijdag om 07:30 en 17:30).
+  - Ontvang automatisch een pushmelding op je smartphone op het ingestelde vertrekuur met de tekst:
+    > *"Tijd voor vertrek! Vergeet je startkilometerstand voor je gebruikte wagen niet te noteren."*
+  - 's Avonds ontvang je een herinnering om de stopkilometerstand te noteren.
+  - **iPhone (iOS 16.4+) tip:** Tik in Safari onderaan op het **Deel**-icoon en kies **Zet op beginscherm**. Open de app vanaf je beginscherm om pushnotificaties direct op je toestel te activeren.
+  - **Android tip:** Druk in Chrome op *"Toevoegen aan startscherm"* of activeer pushmeldingen met één klik via de knop *"Pushmeldingen inschakelen op dit toestel"*.
+
 
 ---
 

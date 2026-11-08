@@ -9,8 +9,20 @@ import { DailyRegistration } from './components/DailyRegistration';
 import { SearchTrips } from './components/SearchTrips';
 import { AdminPanel } from './components/AdminPanel';
 import { SettingsView } from './components/SettingsView';
+import { RideRequestView } from './components/RideRequestView';
+import { DriverPickupModal } from './components/DriverPickupModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { Trip, Vehicle, Team, DailyReading, UserProfile, AppSettings } from './types';
+import {
+  Trip,
+  Vehicle,
+  Team,
+  DailyReading,
+  UserProfile,
+  AppSettings,
+  WeekdayReminder,
+  RideRequest,
+} from './types';
+import { Compass, Package } from 'lucide-react';
 import {
   seedInitialDataIfEmpty,
   INITIAL_VEHICLES,
@@ -18,7 +30,13 @@ import {
   INITIAL_PROFILES,
   DEFAULT_APP_SETTINGS,
   getLatestVehicleMileage,
+  getNotificationSettings,
 } from './services/tripService';
+import {
+  registerServiceWorker,
+  startReminderWatcher,
+  subscribeDeviceToPushServer,
+} from './services/notificationService';
 
 function MainApp() {
   const { profile, loading: authLoading } = useAuth();
@@ -33,6 +51,8 @@ function MainApp() {
   const [dailyReadings, setDailyReadings] = useState<DailyReading[]>([]);
   const [allProfiles, setAllProfiles] = useState<UserProfile[]>(INITIAL_PROFILES);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [rideRequests, setRideRequests] = useState<RideRequest[]>([]);
+  const [pickupModalRequest, setPickupModalRequest] = useState<RideRequest | null>(null);
 
   // Scanned vehicle from QR code URL query (?vehicleId=...)
   const [scannedVehicleId, setScannedVehicleId] = useState<string | null>(() => {
@@ -58,10 +78,50 @@ function MainApp() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Seed default data if empty on start
+  // Seed default data and register service worker + auto-sync push subscription if granted
   useEffect(() => {
     seedInitialDataIfEmpty();
-  }, []);
+    registerServiceWorker().then(() => {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        const currentUserId = profile?.id || INITIAL_PROFILES[0].id;
+        getNotificationSettings(currentUserId).then((schedules) => {
+          subscribeDeviceToPushServer(currentUserId, schedules);
+        });
+      }
+    });
+  }, [profile?.id]);
+
+  // Background reminder watcher for scheduled weekday notifications
+  useEffect(() => {
+    const currentUserId = profile?.id || INITIAL_PROFILES[0].id;
+    let cachedSchedules: WeekdayReminder[] = [];
+
+    getNotificationSettings(currentUserId).then((s) => {
+      cachedSchedules = s;
+    });
+
+    const stopWatcher = startReminderWatcher(
+      () => cachedSchedules,
+      (type) => {
+        if (type === 'start') {
+          addToast(
+            'Pushmelding verzonden: "Tijd voor vertrek! Vergeet je startkilometerstand voor je gebruikte wagen niet te noteren."',
+            'info'
+          );
+        } else {
+          addToast(
+            'Pushmelding verzonden: "Einde van de werkdag! Vergeet je stopkilometerstand voor je gebruikte wagen niet te noteren."',
+            'info'
+          );
+        }
+      }
+    );
+
+    return () => {
+      stopWatcher();
+    };
+  }, [profile?.id]);
+
 
   // Realtime listeners for Firestore
   useEffect(() => {
@@ -138,6 +198,17 @@ function MainApp() {
       }
     );
 
+    const unsubRideRequests = onSnapshot(
+      collection(db, 'ride_requests'),
+      (snap) => {
+        const items = snap.docs.map((doc) => doc.data() as RideRequest);
+        setRideRequests(items);
+      },
+      (error) => {
+        console.warn('Ride requests listener error:', error);
+      }
+    );
+
     return () => {
       unsubTrips();
       unsubVehicles();
@@ -145,8 +216,37 @@ function MainApp() {
       unsubReadings();
       unsubProfiles();
       unsubSettings();
+      unsubRideRequests();
     };
   }, []);
+
+  // Sync active drivers who possess a vehicle to the server for push targeting
+  useEffect(() => {
+    const activeOpenTrips = trips.filter((t) => t.status === 'open');
+    const activeUserIds = Array.from(new Set(activeOpenTrips.map((t) => t.userId)));
+    fetch('/api/push/sync-active-drivers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeDriverUserIds: activeUserIds }),
+    }).catch((err) => {
+      console.debug('Active drivers sync failed:', err);
+    });
+  }, [trips]);
+
+  // URL query parameter detection: ?action=pickup&requestId=...
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const action = params.get('action');
+      const reqId = params.get('requestId');
+      if (action === 'pickup' && reqId && rideRequests.length > 0) {
+        const found = rideRequests.find((r) => r.id === reqId && r.status === 'pending');
+        if (found) {
+          setPickupModalRequest(found);
+        }
+      }
+    }
+  }, [rideRequests]);
 
   // Resolve QR scanned vehicle if URL has ?vehicleId=...
   const scannedVehicle = scannedVehicleId
@@ -221,6 +321,9 @@ function MainApp() {
     );
   }
 
+  const pendingRideRequests = rideRequests.filter((r) => r.status === 'pending');
+  const isDriverHoldingVehicle = Boolean(myOpenTrip);
+
   return (
     <div className="min-h-screen bg-stone-100/70 text-stone-900 flex flex-col font-sans antialiased selection:bg-stone-900 selection:text-white">
       {/* Toast notifications */}
@@ -231,10 +334,45 @@ function MainApp() {
         activeTab={activeActionVehicle ? 'new_trip' : activeTab}
         onSelectTab={handleSelectTab}
         openTripCount={myOpenTrip ? 1 : 0}
+        rideRequestModuleEnabled={appSettings.rideRequestModuleEnabled ?? true}
+        pendingRideRequestCount={pendingRideRequests.length}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4">
+        {/* Driver quick alert banner if logged in user holds a car and colleagues need a ride */}
+        {pendingRideRequests.length > 0 && isDriverHoldingVehicle && activeTab === 'dashboard' && (
+          <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-400/20 text-amber-900 shrink-0">
+                <Compass className="w-5 h-5 text-amber-700 animate-spin" />
+              </div>
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                  Oproep voor collega oppikken!
+                </div>
+                <div className="text-sm font-bold text-stone-900">
+                  {pendingRideRequests[0].requesterName} zoekt vervoer van{' '}
+                  <span className="text-emerald-700 font-semibold">{pendingRideRequests[0].fromLocation}</span> naar{' '}
+                  <span className="text-indigo-700 font-semibold">{pendingRideRequests[0].toLocation}</span>
+                </div>
+                {pendingRideRequests[0].hasMaterials && (
+                  <div className="text-[11px] font-semibold text-amber-900 flex items-center gap-1 mt-0.5">
+                    <Package className="w-3.5 h-3.5" />
+                    <span>Collega heeft materiaal mee dat vervoerd moet worden</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPickupModalRequest(pendingRideRequests[0])}
+              className="py-2.5 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-xs transition active:scale-[0.98] shrink-0"
+            >
+              Ik pik collega op
+            </button>
+          </div>
+        )}
         {/* 1. SCENARIO: A vehicle is active (via QR code scan or direct selection)
             Strictly 1 visible smartphone screen: Top vehicle header, adjustable KM, purpose dropdown + editable, Start/Stop rit button or Cancel.
             NO OTHER VEHICLE IS PROPOSED! */}
@@ -407,6 +545,48 @@ function MainApp() {
             user={currentUser}
             teams={teams}
             onSuccess={(msg) => addToast(msg, 'info')}
+          />
+        )}
+
+        {/* Vervoer Zoeken & Collega Oppikken Module */}
+        {activeTab === 'ride_request' && (
+          <RideRequestView
+            currentUser={currentUser}
+            appSettings={appSettings}
+            rideRequests={rideRequests}
+            openTrips={trips}
+            vehicles={vehicles}
+            onSuccess={(msg) => addToast(msg, 'success')}
+            onOpenDriverModal={(req) => setPickupModalRequest(req)}
+          />
+        )}
+
+        {/* Modal for driver picking up colleague */}
+        {pickupModalRequest && (
+          <DriverPickupModal
+            request={pickupModalRequest}
+            currentUser={currentUser}
+            openTrips={trips}
+            vehicles={accessibleVehicles.length > 0 ? accessibleVehicles : vehicles}
+            onClose={() => {
+              setPickupModalRequest(null);
+              if (
+                typeof window !== 'undefined' &&
+                window.location.search.includes('action=pickup')
+              ) {
+                window.history.replaceState({}, '', window.location.pathname);
+              }
+            }}
+            onSuccess={(msg) => {
+              addToast(msg, 'success');
+              setPickupModalRequest(null);
+              if (
+                typeof window !== 'undefined' &&
+                window.location.search.includes('action=pickup')
+              ) {
+                window.history.replaceState({}, '', window.location.pathname);
+              }
+            }}
           />
         )}
       </main>

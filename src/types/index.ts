@@ -97,5 +97,33 @@ export interface AppSettings {
   id: string;
   purposes: string[];
   defaultExpectedDailyKm: number;
+  rideRequestModuleEnabled: boolean; // Administrator toggle voor Vervoer Zoeken
   updatedAt: string;
 }
+
+export type RideRequestStatus = 'pending' | 'accepted' | 'completed' | 'cancelled';
+
+export interface RideRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  requesterPhone?: string;
+  teamId?: string;
+  fromLocation: string; // Waar je nu bent
+  toLocation: string;   // Naar waar je moet
+  hasMaterials: boolean;// Vinkje voor materiaal mee te vervoeren
+  notes?: string;
+  status: RideRequestStatus;
+  createdAt: string;
+  lastNotifiedAt: string;
+  retryCount: number;
+  // Gevuld wanneer chauffeur accepteert:
+  driverId?: string;
+  driverName?: string;
+  driverVehicleId?: string;
+  driverLicensePlate?: string;
+  driverVehicleName?: string;
+  etaMinutes?: number;  // 5, 10, 15 of eigen waarde
+  acceptedAt?: string;
+}
+

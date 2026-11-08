@@ -101,6 +101,23 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "userId", "schedules"]
+    },
+    "RideRequest": {
+      "title": "RideRequest",
+      "description": "Transport/ride request with pickup location, destination, and driver response ETA.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requesterId": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "fromLocation": { "type": "string" },
+        "toLocation": { "type": "string" },
+        "hasMaterials": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "completed", "cancelled"] },
+        "etaMinutes": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "requesterId", "requesterName", "fromLocation", "toLocation", "hasMaterials", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -127,6 +144,10 @@
     "/notification_settings/{userId}": {
       "schema": { "$ref": "#/entities/NotificationSettings" },
       "description": "Trip reminder settings per user."
+    },
+    "/ride_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/RideRequest" },
+      "description": "Ride/transport requests and driver pickup coordination."
     }
   }
 }

@@ -36,6 +36,19 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
 }) => {
   const isSuperAdmin = currentUser.role === 'admin';
   const isFleetAdmin = currentUser.role === 'fleet_admin' || isSuperAdmin;
+  const userTeamIds = currentUser.teamIds || [];
+
+  // Security: Only super admin sees all vehicles.
+  // Fleet admins and regular users strictly only see vehicles of their assigned team(s).
+  const visibleVehicles = isSuperAdmin
+    ? vehicles
+    : vehicles.filter((v) => userTeamIds.includes(v.teamId));
+
+  const visibleVehicleIds = new Set(visibleVehicles.map((v) => v.id));
+
+  const visibleTeams = isSuperAdmin
+    ? teams
+    : teams.filter((t) => userTeamIds.includes(t.id));
 
   // Selected date (defaults to today)
   const todayStr = new Date().toISOString().split('T')[0];
@@ -66,6 +79,21 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
   const dayTrips = useMemo(() => {
     return trips
       .filter((t) => {
+        // Enforce vehicle access:
+        // Only super admin sees all trips across all vehicles.
+        // Fleet admins ONLY see trips of vehicles belonging to their own team(s).
+        // Regular users only see their own trips.
+        if (!isSuperAdmin) {
+          const isOwnVehicle = visibleVehicleIds.has(t.vehicleId);
+          const isOwnTeam = t.teamId && userTeamIds.includes(t.teamId);
+          if (!isOwnVehicle && !isOwnTeam) {
+            return false;
+          }
+          if (currentUser.role === 'user' && t.userId !== currentUser.id) {
+            return false;
+          }
+        }
+
         // Match day by start date or end date
         const startDatePart = t.startTime.split('T')[0];
         const endDatePart = t.endTime ? t.endTime.split('T')[0] : null;
@@ -90,7 +118,7 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
         return true;
       })
       .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  }, [trips, selectedDate, selectedTeamId, selectedVehicleId, onlyAnomalies]);
+  }, [trips, selectedDate, selectedTeamId, selectedVehicleId, onlyAnomalies, isSuperAdmin, visibleVehicleIds, userTeamIds, currentUser.role, currentUser.id]);
 
   // Daily statistics
   const totalDayKm = dayTrips.reduce((acc, t) => {
@@ -222,8 +250,10 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
           onChange={(e) => setSelectedTeamId(e.target.value)}
           className="p-1.5 rounded-lg border border-stone-300 bg-white font-medium text-xs focus:ring-1 focus:ring-stone-900"
         >
-          <option value="all">Alle wagenparken / teams</option>
-          {teams.map((t) => (
+          <option value="all">
+            {isSuperAdmin ? 'Alle wagenparken / teams' : 'Mijn wagenpark(en)'}
+          </option>
+          {visibleTeams.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
             </option>
@@ -236,8 +266,10 @@ export const DayOverview: React.FC<DayOverviewProps> = ({
           onChange={(e) => setSelectedVehicleId(e.target.value)}
           className="p-1.5 rounded-lg border border-stone-300 bg-white font-medium text-xs focus:ring-1 focus:ring-stone-900"
         >
-          <option value="all">Alle wagens</option>
-          {vehicles.map((v) => (
+          <option value="all">
+            {isSuperAdmin ? 'Alle wagens' : 'Mijn teamwagens'}
+          </option>
+          {visibleVehicles.map((v) => (
             <option key={v.id} value={v.id}>
               {v.licensePlate} ({v.brand} {v.model})
             </option>

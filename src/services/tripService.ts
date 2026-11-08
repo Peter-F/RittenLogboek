@@ -20,6 +20,8 @@ import {
   WeekdayReminder,
   UserProfile,
   AppSettings,
+  RideRequest,
+  RideRequestStatus,
 } from '../types';
 
 // Default teams
@@ -147,6 +149,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     'Intern transport',
   ],
   defaultExpectedDailyKm: 50,
+  rideRequestModuleEnabled: true,
   updatedAt: new Date().toISOString(),
 };
 
@@ -727,5 +730,152 @@ export async function updateUserProfile(
 
   await updateDoc(doc(db, 'profiles', id), updates);
 }
+
+/**
+ * Clean undefined values from an object before sending to Firestore
+ */
+function cleanUndefined<T extends Record<string, any>>(obj: T): T {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
+
+/**
+ * RIDE REQUEST OPERATIONS (Vervoer Zoeken)
+ */
+export async function createRideRequest(
+  data: Omit<RideRequest, 'id' | 'createdAt' | 'lastNotifiedAt' | 'retryCount' | 'status'>
+): Promise<RideRequest> {
+  const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+  const now = new Date().toISOString();
+
+  const newRequest: RideRequest = {
+    ...data,
+    id: requestId,
+    status: 'pending',
+    createdAt: now,
+    lastNotifiedAt: now,
+    retryCount: 0,
+  };
+
+  try {
+    const payload = cleanUndefined(newRequest);
+    await setDoc(doc(db, 'ride_requests', requestId), payload);
+
+    // Trigger server push notification to all users currently holding an active vehicle
+    fetch('/api/push/ride-request/notify-drivers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: newRequest.id,
+        requesterId: newRequest.requesterId,
+        requesterName: newRequest.requesterName,
+        fromLocation: newRequest.fromLocation,
+        toLocation: newRequest.toLocation,
+        hasMaterials: newRequest.hasMaterials,
+        notes: newRequest.notes || '',
+      }),
+    }).catch((err) => {
+      console.warn('Could not trigger server push to drivers:', err);
+    });
+
+    return newRequest;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `ride_requests/${requestId}`);
+    throw error;
+  }
+}
+
+export async function acceptRideRequest(
+  requestId: string,
+  driver: { id: string; name: string },
+  vehicle: { id: string; licensePlate: string; name: string },
+  etaMinutes: number
+): Promise<void> {
+  const now = new Date().toISOString();
+  try {
+    const reqRef = doc(db, 'ride_requests', requestId);
+    const snap = await getDoc(reqRef);
+    if (!snap.exists()) {
+      throw new Error('Aanvraag niet gevonden');
+    }
+    const current = snap.data() as RideRequest;
+    if (current.status !== 'pending') {
+      throw new Error('Deze aanvraag is reeds geaccepteerd of geannuleerd.');
+    }
+
+    const updates = cleanUndefined({
+      status: 'accepted' as RideRequestStatus,
+      driverId: driver.id,
+      driverName: driver.name,
+      driverVehicleId: vehicle.id,
+      driverLicensePlate: vehicle.licensePlate,
+      driverVehicleName: vehicle.name || '',
+      etaMinutes,
+      acceptedAt: now,
+    });
+
+    await updateDoc(reqRef, updates);
+
+    // Trigger push notification to the requester: driver is coming!
+    fetch('/api/push/ride-request/notify-accepted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId,
+        requesterId: current.requesterId,
+        driverName: driver.name,
+        licensePlate: vehicle.licensePlate,
+        vehicleName: vehicle.name,
+        etaMinutes,
+      }),
+    }).catch((err) => {
+      console.warn('Could not trigger server push to requester:', err);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `ride_requests/${requestId}`);
+    throw error;
+  }
+}
+
+export async function cancelRideRequest(requestId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'ride_requests', requestId), {
+      status: 'cancelled',
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `ride_requests/${requestId}`);
+    throw error;
+  }
+}
+
+export async function completeRideRequest(requestId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'ride_requests', requestId), {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `ride_requests/${requestId}`);
+    throw error;
+  }
+}
+
+/**
+ * Format expected arrival time as "rond 18u20"
+ */
+export function formatExpectedArrivalTime(baseDate?: string, minutes: number = 10): string {
+  const base = baseDate ? new Date(baseDate) : new Date();
+  const arrival = new Date(base.getTime() + minutes * 60 * 1000);
+  const hours = arrival.getHours();
+  const mins = String(arrival.getMinutes()).padStart(2, '0');
+  return `rond ${hours}u${mins}`;
+}
+
 
 

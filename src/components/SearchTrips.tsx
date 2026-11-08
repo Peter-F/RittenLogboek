@@ -36,8 +36,9 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
   currentUser,
   profiles,
 }) => {
-  const isFleetAdminOrAbove =
-    currentUser.role === 'fleet_admin' || currentUser.role === 'admin';
+  const isSuperAdmin = currentUser.role === 'admin';
+  const isFleetAdmin = currentUser.role === 'fleet_admin';
+  const isFleetAdminOrAbove = isSuperAdmin || isFleetAdmin;
 
   // Sub-view mode: 'day' for specific day logging inspection or 'custom' for range/text search
   const [viewMode, setViewMode] = useState<'day' | 'custom'>('day');
@@ -55,20 +56,34 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [onlyAnomalies, setOnlyAnomalies] = useState(false);
 
-  // Vehicles visible to current user (users only see vehicles of their assigned teams)
+  // Strict role enforcement:
+  // ONLY the system administrator can view all vehicles.
+  // Fleet administrators and regular users ONLY have access to the vehicles of their assigned team(s).
   const userTeamIds = currentUser.teamIds || [];
-  const visibleVehicles = isFleetAdminOrAbove
+  const visibleVehicles = isSuperAdmin
     ? vehicles
     : vehicles.filter((v) => userTeamIds.includes(v.teamId));
+
+  const visibleVehicleIds = new Set(visibleVehicles.map((v) => v.id));
+
+  const visibleTeams = isSuperAdmin
+    ? teams
+    : teams.filter((t) => userTeamIds.includes(t.id));
 
   const filteredTrips = useMemo(() => {
     return trips
       .filter((trip) => {
-        // Non-admins can only see their own trips or trips of vehicles belonging to their teams
-        if (!isFleetAdminOrAbove) {
-          const isOwn = trip.userId === currentUser.id;
+        // Enforce vehicle access:
+        // Only super admin sees trips across the whole organization.
+        // Fleet admins ONLY see trips of vehicles belonging to their own team(s).
+        // Regular users only see their own trips.
+        if (!isSuperAdmin) {
+          const isOwnVehicle = visibleVehicleIds.has(trip.vehicleId);
           const isOwnTeam = trip.teamId && userTeamIds.includes(trip.teamId);
-          if (!isOwn && !isOwnTeam) {
+          if (!isOwnVehicle && !isOwnTeam) {
+            return false;
+          }
+          if (!isFleetAdminOrAbove && trip.userId !== currentUser.id) {
             return false;
           }
         }
@@ -241,7 +256,7 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
         <DayOverview
           trips={trips}
           vehicles={visibleVehicles}
-          teams={teams}
+          teams={visibleTeams}
           currentUser={currentUser}
           profiles={profiles}
         />
@@ -299,7 +314,7 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
               </div>
 
               {/* Team / Wagenpark */}
-              {teams.length > 0 && (
+              {visibleTeams.length > 0 && (
                 <div>
                   <label className="block text-stone-500 font-semibold mb-1 uppercase tracking-wider text-[11px]">
                     Team / Wagenpark
@@ -309,8 +324,10 @@ export const SearchTrips: React.FC<SearchTripsProps> = ({
                     onChange={(e) => setSelectedTeamId(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-stone-900 focus:outline-none font-medium"
                   >
-                    <option value="all">Alle teams</option>
-                    {teams.map((t) => (
+                    <option value="all">
+                      {isSuperAdmin ? 'Alle teams' : 'Mijn team(s)'}
+                    </option>
+                    {visibleTeams.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>

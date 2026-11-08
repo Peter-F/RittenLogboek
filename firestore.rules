@@ -51,6 +51,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Push subscriptions for background notification delivery
+    match /push_subscriptions/{subId} {
+      allow read, write: if true;
+    }
+
+    // Ride requests (Vervoer zoeken)
+    match /ride_requests/{requestId} {
+      allow read, write: if true;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

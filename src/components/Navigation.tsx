@@ -10,21 +10,34 @@ import {
   LogOut,
   LogIn,
   Users,
+  Compass,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export type NavTab = 'dashboard' | 'new_trip' | 'close_trip' | 'daily' | 'search' | 'admin' | 'settings';
+export type NavTab =
+  | 'dashboard'
+  | 'new_trip'
+  | 'ride_request'
+  | 'close_trip'
+  | 'daily'
+  | 'search'
+  | 'admin'
+  | 'settings';
 
 interface NavigationProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   openTripCount?: number;
+  rideRequestModuleEnabled?: boolean;
+  pendingRideRequestCount?: number;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   onSelectTab,
   openTripCount = 0,
+  rideRequestModuleEnabled = true,
+  pendingRideRequestCount = 0,
 }) => {
   const { profile, currentUser, signInWithGoogle, logout, simulatedProfiles, switchProfile, isSimulated } =
     useAuth();
@@ -95,6 +108,25 @@ export const Navigation: React.FC<NavigationProps> = ({
                 <PlusCircle className="w-4 h-4" />
                 Nieuwe rit
               </button>
+
+              {rideRequestModuleEnabled && (
+                <button
+                  onClick={() => onSelectTab('ride_request')}
+                  className={`px-3.5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${
+                    activeTab === 'ride_request'
+                      ? 'bg-stone-900 text-white'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
+                  }`}
+                >
+                  <Compass className="w-4 h-4 text-emerald-500" />
+                  Vervoer zoeken
+                  {pendingRideRequestCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
+                      {pendingRideRequestCount}
+                    </span>
+                  )}
+                </button>
+              )}
 
               <button
                 onClick={() => onSelectTab('daily')}
@@ -208,10 +240,10 @@ export const Navigation: React.FC<NavigationProps> = ({
 
       {/* Mobile Bottom Navigation Bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 pb-safe">
-        <div className="grid grid-cols-5 h-16">
+        <div className={`grid ${rideRequestModuleEnabled ? 'grid-cols-6' : 'grid-cols-5'} h-16`}>
           <button
             onClick={() => onSelectTab('dashboard')}
-            className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               activeTab === 'dashboard' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
             }`}
           >
@@ -226,7 +258,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
           <button
             onClick={() => onSelectTab('new_trip')}
-            className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               activeTab === 'new_trip' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
             }`}
           >
@@ -234,9 +266,26 @@ export const Navigation: React.FC<NavigationProps> = ({
             <span>Nieuw</span>
           </button>
 
+          {rideRequestModuleEnabled && (
+            <button
+              onClick={() => onSelectTab('ride_request')}
+              className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+                activeTab === 'ride_request' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
+              }`}
+            >
+              <div className="relative">
+                <Compass className="w-5 h-5 text-emerald-600" />
+                {pendingRideRequestCount > 0 && (
+                  <span className="absolute -top-1 -right-1.5 w-2.5 h-2.5 bg-amber-500 rounded-full ring-2 ring-white animate-pulse" />
+                )}
+              </div>
+              <span>Vervoer</span>
+            </button>
+          )}
+
           <button
             onClick={() => onSelectTab('daily')}
-            className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               activeTab === 'daily' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
             }`}
           >
@@ -246,7 +295,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
           <button
             onClick={() => onSelectTab('search')}
-            className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               activeTab === 'search' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
             }`}
           >
@@ -257,7 +306,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           {isFleetAdminOrAbove ? (
             <button
               onClick={() => onSelectTab('admin')}
-              className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+              className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
                 activeTab === 'admin' ? 'text-indigo-600 font-bold' : 'text-stone-400 hover:text-stone-700'
               }`}
             >
@@ -267,7 +316,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           ) : (
             <button
               onClick={() => onSelectTab('settings')}
-              className={`flex flex-col items-center justify-center gap-1 text-xs font-medium transition ${
+              className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
                 activeTab === 'settings' ? 'text-stone-900 font-bold' : 'text-stone-400 hover:text-stone-700'
               }`}
             >
