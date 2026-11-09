@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, onSnapshot } from 'firebase/firestore';
-import { db } from './lib/firebase';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigation, NavTab } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -31,6 +29,14 @@ import {
   DEFAULT_APP_SETTINGS,
   getLatestVehicleMileage,
   getNotificationSettings,
+  subscribeToRealtimeEvents,
+  fetchAllTrips,
+  fetchAllVehicles,
+  fetchAllTeams,
+  fetchAllProfiles,
+  fetchAllDailyReadings,
+  fetchAllRideRequests,
+  getAppSettings,
 } from './services/tripService';
 import {
   registerServiceWorker,
@@ -123,100 +129,80 @@ function MainApp() {
   }, [profile?.id]);
 
 
-  // Realtime listeners for Firestore
+  // Load data and listen for realtime Server-Sent Events (SSE) from MariaDB backend
   useEffect(() => {
-    const unsubTrips = onSnapshot(
-      collection(db, 'trips'),
-      (snap) => {
-        const items = snap.docs.map((doc) => doc.data() as Trip);
-        setTrips(items);
-      },
-      (error) => {
-        console.warn('Trips listener error:', error);
-      }
-    );
+    let isMounted = true;
 
-    const unsubVehicles = onSnapshot(
-      collection(db, 'vehicles'),
-      (snap) => {
-        if (!snap.empty) {
-          const items = snap.docs.map((doc) => doc.data() as Vehicle);
-          setVehicles(items);
-        }
-      },
-      (error) => {
-        console.warn('Vehicles listener error:', error);
-      }
-    );
+    const loadAllData = async () => {
+      try {
+        const [
+          fetchedTrips,
+          fetchedVehicles,
+          fetchedTeams,
+          fetchedReadings,
+          fetchedProfiles,
+          fetchedSettings,
+          fetchedRideReqs,
+        ] = await Promise.all([
+          fetchAllTrips(),
+          fetchAllVehicles(),
+          fetchAllTeams(),
+          fetchAllDailyReadings(),
+          fetchAllProfiles(),
+          getAppSettings(),
+          fetchAllRideRequests(),
+        ]);
 
-    const unsubTeams = onSnapshot(
-      collection(db, 'teams'),
-      (snap) => {
-        if (!snap.empty) {
-          const items = snap.docs.map((doc) => doc.data() as Team);
-          setTeams(items);
-        }
-      },
-      (error) => {
-        console.warn('Teams listener error:', error);
+        if (!isMounted) return;
+        if (fetchedTrips) setTrips(fetchedTrips);
+        if (fetchedVehicles && fetchedVehicles.length > 0) setVehicles(fetchedVehicles);
+        if (fetchedTeams && fetchedTeams.length > 0) setTeams(fetchedTeams);
+        if (fetchedReadings) setDailyReadings(fetchedReadings);
+        if (fetchedProfiles && fetchedProfiles.length > 0) setAllProfiles(fetchedProfiles);
+        if (fetchedSettings) setAppSettings(fetchedSettings);
+        if (fetchedRideReqs) setRideRequests(fetchedRideReqs);
+      } catch (err) {
+        console.warn('Initial data load warning:', err);
       }
-    );
+    };
 
-    const unsubReadings = onSnapshot(
-      collection(db, 'daily_readings'),
-      (snap) => {
-        const items = snap.docs.map((doc) => doc.data() as DailyReading);
-        setDailyReadings(items);
-      },
-      (error) => {
-        console.warn('Readings listener error:', error);
-      }
-    );
+    loadAllData();
 
-    const unsubProfiles = onSnapshot(
-      collection(db, 'profiles'),
-      (snap) => {
-        if (!snap.empty) {
-          const items = snap.docs.map((doc) => doc.data() as UserProfile);
-          setAllProfiles(items);
-        }
-      },
-      (error) => {
-        console.warn('Profiles listener error:', error);
+    // Subscribe to realtime SSE stream from MariaDB server
+    const unsubscribeSSE = subscribeToRealtimeEvents((event) => {
+      if (!isMounted) return;
+      switch (event.type) {
+        case 'trips':
+          if (Array.isArray(event.data)) setTrips(event.data);
+          break;
+        case 'vehicles':
+          if (Array.isArray(event.data)) setVehicles(event.data);
+          break;
+        case 'teams':
+          if (Array.isArray(event.data)) setTeams(event.data);
+          break;
+        case 'daily_readings':
+          if (Array.isArray(event.data)) setDailyReadings(event.data);
+          break;
+        case 'profiles':
+          if (Array.isArray(event.data)) setAllProfiles(event.data);
+          break;
+        case 'app_settings':
+          if (event.data) setAppSettings(event.data);
+          break;
+        case 'ride_requests':
+          if (Array.isArray(event.data)) setRideRequests(event.data);
+          break;
       }
-    );
+    });
 
-    const unsubSettings = onSnapshot(
-      doc(db, 'app_settings', 'global_settings'),
-      (snap) => {
-        if (snap.exists()) {
-          setAppSettings(snap.data() as AppSettings);
-        }
-      },
-      (error) => {
-        console.warn('Settings listener error:', error);
-      }
-    );
-
-    const unsubRideRequests = onSnapshot(
-      collection(db, 'ride_requests'),
-      (snap) => {
-        const items = snap.docs.map((doc) => doc.data() as RideRequest);
-        setRideRequests(items);
-      },
-      (error) => {
-        console.warn('Ride requests listener error:', error);
-      }
-    );
+    // Periodic sync every 20 seconds for high resilience
+    const interval = setInterval(loadAllData, 20000);
 
     return () => {
-      unsubTrips();
-      unsubVehicles();
-      unsubTeams();
-      unsubReadings();
-      unsubProfiles();
-      unsubSettings();
-      unsubRideRequests();
+      isMounted = false;
+      unsubscribeSSE();
+      clearInterval(interval);
     };
   }, []);
 

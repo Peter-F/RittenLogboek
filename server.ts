@@ -5,6 +5,27 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { createRequire } from 'module';
 import type { PushSubscription } from 'web-push';
+import {
+  initMariaDB,
+  getDbStatus,
+  dbGetVehicles,
+  dbSaveVehicle,
+  dbDeleteVehicle,
+  dbGetTrips,
+  dbCreateTrip,
+  dbCloseTrip,
+  dbGetTeams,
+  dbSaveTeam,
+  dbGetProfiles,
+  dbUpdateProfile,
+  dbGetAppSettings,
+  dbUpdateAppSettings,
+  dbGetDailyReadings,
+  dbSaveDailyReading,
+  dbGetRideRequests,
+  dbSaveRideRequest,
+  dbUpdateRideRequest,
+} from './server/mariadb.ts';
 
 const require = createRequire(import.meta.url);
 const webpush = require('web-push');
@@ -354,6 +375,225 @@ app.get('/api/push/status', (_req: Request, res: Response) => {
   });
 });
 
+// ====================================================================
+// MARIADB DATABASE & REALTIME REST API
+// ====================================================================
+
+// Realtime SSE clients
+let sseClients: Response[] = [];
+
+export function broadcastRealtimeEvent(eventType: string, data: any) {
+  const payload = `data: ${JSON.stringify({ type: eventType, data })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch (e) {
+      // client disconnected
+    }
+  }
+}
+
+app.get('/api/events', (req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`);
+  sseClients.push(res);
+  req.on('close', () => {
+    sseClients = sseClients.filter((c) => c !== res);
+  });
+});
+
+// Database status & diagnostic info
+app.get('/api/db/status', (_req: Request, res: Response) => {
+  res.json(getDbStatus());
+});
+
+app.post('/api/db/reconnect', async (_req: Request, res: Response) => {
+  try {
+    const status = await initMariaDB();
+    res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message, ...getDbStatus() });
+  }
+});
+
+// 1. Teams
+app.get('/api/teams', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetTeams();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/teams', async (req: Request, res: Response) => {
+  try {
+    const team = await dbSaveTeam(req.body);
+    broadcastRealtimeEvent('teams_updated', team);
+    res.json(team);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Profiles
+app.get('/api/profiles', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetProfiles();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/profiles/:id', async (req: Request, res: Response) => {
+  try {
+    const updated = await dbUpdateProfile(req.params.id, req.body);
+    broadcastRealtimeEvent('profiles_updated', updated);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Vehicles
+app.get('/api/vehicles', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetVehicles();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/vehicles', async (req: Request, res: Response) => {
+  try {
+    const veh = await dbSaveVehicle(req.body);
+    broadcastRealtimeEvent('vehicles_updated', veh);
+    res.json(veh);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/vehicles/:id', async (req: Request, res: Response) => {
+  try {
+    await dbDeleteVehicle(req.params.id);
+    broadcastRealtimeEvent('vehicles_updated', { id: req.params.id, deleted: true });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Trips
+app.get('/api/trips', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetTrips();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/trips', async (req: Request, res: Response) => {
+  try {
+    const trip = await dbCreateTrip(req.body);
+    broadcastRealtimeEvent('trips_updated', trip);
+    broadcastRealtimeEvent('vehicles_updated', { id: trip.vehicleId, lastKnownKm: trip.endKm || trip.startKm });
+    res.json(trip);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/trips/:id/close', async (req: Request, res: Response) => {
+  try {
+    const trip = await dbCloseTrip(req.params.id, req.body);
+    broadcastRealtimeEvent('trips_updated', trip);
+    if (req.body.vehicleId) {
+      broadcastRealtimeEvent('vehicles_updated', { id: req.body.vehicleId, lastKnownKm: req.body.endKm });
+    }
+    res.json(trip);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. App Settings
+app.get('/api/app-settings', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetAppSettings();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/app-settings', async (req: Request, res: Response) => {
+  try {
+    const settings = await dbUpdateAppSettings(req.body);
+    broadcastRealtimeEvent('settings_updated', settings);
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Daily Readings
+app.get('/api/daily-readings', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetDailyReadings();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/daily-readings', async (req: Request, res: Response) => {
+  try {
+    const reading = await dbSaveDailyReading(req.body);
+    broadcastRealtimeEvent('readings_updated', reading);
+    res.json(reading);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Ride Requests (Vervoer Zoeken)
+app.get('/api/ride-requests', async (_req: Request, res: Response) => {
+  try {
+    const data = await dbGetRideRequests();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ride-requests', async (req: Request, res: Response) => {
+  try {
+    const reqData = await dbSaveRideRequest(req.body);
+    broadcastRealtimeEvent('ride_requests_updated', reqData);
+    res.json(reqData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/ride-requests/:id', async (req: Request, res: Response) => {
+  try {
+    const updated = await dbUpdateRideRequest(req.params.id, req.body);
+    broadcastRealtimeEvent('ride_requests_updated', updated);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * Helper to get Belgium / Western Europe time (Brussels)
  */
@@ -505,6 +745,15 @@ setInterval(runBackgroundReminderCheck, 25000);
  * Initialize Vite Dev Server or Production Static Serving
  */
 async function startServer() {
+  // Initialize MariaDB or fallback local persistence
+  try {
+    await initMariaDB();
+    const dbStatus = getDbStatus();
+    console.log(`🗄️ Database mode: ${dbStatus.mode} (connected: ${dbStatus.connected})`);
+  } catch (err: any) {
+    console.warn('⚠️ MariaDB initialization warning:', err?.message);
+  }
+
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (!isProduction) {
