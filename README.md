@@ -13,9 +13,10 @@ De app is primair ontworpen voor gebruik op smartphones en tablets (met grote to
 3. [Rollen & Bevoegdheden](#rollen--bevoegdheden)
 4. [Gebruikte Technologieën](#gebruikte-technologieën)
 5. [Installatie- & Ontwikkelgids](#installatie--ontwikkelgids)
-6. [Handleiding voor Medewerkers](#handleiding-voor-medewerkers)
-7. [Handleiding voor Beheerders](#handleiding-voor-beheerders)
-8. [Datamodel & Beveiliging](#datamodel--beveiliging)
+6. [Hosten met Docker & Docker Compose](#hosten-met-docker--docker-compose)
+7. [Handleiding voor Medewerkers](#handleiding-voor-medewerkers)
+8. [Handleiding voor Beheerders](#handleiding-voor-beheerders)
+9. [Datamodel & Beveiliging](#datamodel--beveiliging)
 
 ---
 
@@ -195,6 +196,56 @@ Dit compileert de TypeScript-code en bundleert de geoptimaliseerde statische bes
 ### 5. Type-checking & Code Quality
 ```bash
 npm run lint
+```
+
+---
+
+## Hosten met Docker & Docker Compose
+
+Voor eenvoudige, betrouwbare hosting op een Linux-server, Synology NAS, VPS of lokale computer is een complete Docker-configuratie voorzien (`Dockerfile`, `docker-compose.yml`, `.dockerignore` en `.env.docker.example`).
+
+### Snelle Start in 1 Commando
+Voer in de hoofdmap van het project uit:
+
+```bash
+docker compose up -d --build
+```
+
+Dit start automatisch drie gekoppelde containers op:
+1. **`wagenrit_app`** (poort `3000`): De gecompileerde Node.js Express server met React PWA.
+2. **`wagenrit_mariadb`** (poort `3306`): De MariaDB 11 server met permanente data-opslag op het volume `mariadb_data`.
+3. **`wagenrit_phpmyadmin`** (poort `8080`): Visuele beheertool in uw webbrowser om tabellen en data in te zien.
+
+### Automatische database-initialisatie
+Bij de allereerste keer dat `docker compose up` wordt uitgevoerd, koppelt Docker het SQL-schema `src/db/schema.sql` automatisch aan `/docker-entrypoint-initdb.d/01_schema.sql`. Alle tabellen, indexen en relaties worden direct aangemaakt. U hoeft geen handmatige SQL-scripts uit te voeren!
+
+### Toegankelijkheid na opstarten
+- **WagenRit Applicatie:** [http://localhost:3000](http://localhost:3000)
+- **phpMyAdmin Database Beheer:** [http://localhost:8080](http://localhost:8080)
+  - Gebruiker: `wagenrit_user` (of `root`)
+  - Wachtwoord: `wagenrit_secret_pass` (of `root_secret_pass`)
+- **MariaDB Directe Poort:** `localhost:3306`
+
+### Eigen poorten of wachtwoorden instellen
+Kopieer optioneel het bestand `.env.docker.example` naar `.env`:
+```bash
+cp .env.docker.example .env
+```
+Pas in `.env` naar wens de poorten (`APP_PORT`, `DB_PORT`, `PMA_PORT`) of wachtwoorden aan.
+
+### Nuttige Docker commando's
+```bash
+# Containers stoppen
+docker compose down
+
+# Logs van de applicatie bekijken
+docker compose logs -f app
+
+# Status van containers controleren
+docker compose ps
+
+# Containers herstarten na code-updates
+docker compose up -d --build
 ```
 
 ---

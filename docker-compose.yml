@@ -1,0 +1,87 @@
+services:
+  # ============================================================================
+  # 1. WagenRit Full-Stack Web Applicatie (PWA + REST API + SSE)
+  # ============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wagenrit:latest
+    container_name: wagenrit_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MARIADB_HOST=mariadb
+      - MARIADB_PORT=3306
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-RittenLogger}
+      - MARIADB_USER=${MARIADB_USER:-wagenrit_user}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-wagenrit_secret_pass}
+      - MARIADB_SSL=false
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - wagenrit_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/db/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================================
+  # 2. MariaDB Relationele Database Server
+  # ============================================================================
+  mariadb:
+    image: mariadb:11
+    container_name: wagenrit_mariadb
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_secret_pass}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-RittenLogger}
+      MARIADB_USER: ${MARIADB_USER:-wagenrit_user}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-wagenrit_secret_pass}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      # Automatische initialisatie van tabellen via het SQL-schema bij eerste opstart:
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    networks:
+      - wagenrit_net
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root --password=$$MARIADB_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ============================================================================
+  # 3. phpMyAdmin (Optionele visuele database management tool)
+  # Bereikbaar op http://localhost:8080
+  # ============================================================================
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: wagenrit_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "${PMA_PORT:-8080}:80"
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+    depends_on:
+      - mariadb
+    networks:
+      - wagenrit_net
+
+volumes:
+  mariadb_data:
+    name: wagenrit_mariadb_data
+
+networks:
+  wagenrit_net:
+    name: wagenrit_network
+    driver: bridge
