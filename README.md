@@ -40,7 +40,7 @@ Per wagen mag er in het systeem te allen tijde slechts **één openstaande rit**
   - `stop_tijd` = starttijd van de nieuwe rit van Gebruiker B
   - `stop_km` = startkilometerstand van de nieuwe rit van Gebruiker B
   - `status` = `"automatisch_afgesloten"` (gemarkeerd met een blauwe badge)
-- De overdracht gebeurt **atomisch en server-side** (via Firestore transacties), waardoor race conditions worden uitgesloten.
+- De overdracht gebeurt **atomisch en server-side** (via MariaDB SQL-transacties met `BEGIN TRANSACTION`, `COMMIT` en `ROLLBACK`), waardoor race conditions worden uitgesloten.
 
 ### 2. Editeerbare tijdstippen (nooit in de toekomst)
 - Zowel bij het starten als stoppen van een rit staat standaard het **huidige tijdstip** ingevuld.
@@ -107,20 +107,25 @@ Het systeem hanteert een strikte rolhiërarchie: **Gebruiker < Wagen Administrat
 
 ## Gebruikte Technologieën
 
-- **Frontend Framework:** React 19 (Functional Components, Hooks)
-- **Programmeertaal:** TypeScript (strikte type safety en data models)
-- **Build Tooling:** Vite 8 met HMR-optimalisaties
-- **Styling:** Tailwind CSS v4 (sobere, professionele UI, geoptimaliseerd voor touch-interfaces)
-- **Iconen:** Lucide React
-- **Database & Realtime Backend:** Google Cloud Firestore (Enterprise Edition)
-  - Realtime synchronisatie via `onSnapshot` listeners
-  - Atomische ritoverdrachten via `runTransaction`
-  - Beveiligingsregels via `firestore.rules`
-- **Authenticatie:** Firebase Authentication met Google Identity Provider (Google OAuth)
-- **Data Export:** CSV-exporteur met UTF-8 BOM ondersteuning voor Microsoft Excel
-- **Full-stack Backend & Achtergrondservice (Stap 2):** Node.js, Express, `web-push` met VAPID-authenticatie
-  - 24/7 Server Cron ticker (Europe/Brussels) die ingestelde herinneringen controleert
-  - Directe push naar Apple (APNs) en Google (FCM) push-servers, ook wanneer de smartphone vergrendeld is en de browser gesloten
+- **Frontend & PWA Framework:** React 19 (Functional Components, Hooks)
+  - Volledige **Progressive Web App (PWA)** met Service Worker caching en installatiemogelijkheid voor iPhone, Android en Desktop.
+  - Offline fallback ondersteuning.
+- **Programmeertaal:** TypeScript (strikte type safety en relationele datamodellen).
+- **Build Tooling:** Vite 8 met HMR-optimalisaties.
+- **Styling:** Tailwind CSS v4 (sobere, professionele UI, geoptimaliseerd voor touch-interfaces).
+- **Iconen:** Lucide React.
+- **Database & Data-opslag:** MariaDB (Relationele SQL Database)
+  - SQL DDL migratiescript in `src/db/schema.sql` met automatische tabelinitialisatie en indexen.
+  - Atomische ritoverdrachten via SQL-transacties (`conn.beginTransaction()`, `conn.commit()`, `conn.rollback()`).
+  - Tweetraps veerkrachtige fallback-modus (`.mariadb_local_store.json`), waardoor de applicatie altijd beschikbaar blijft, zelfs als de databaseverbinding offline is.
+- **Full-stack Backend & API:** Node.js, Express, officiële `mariadb` driver met connection pool.
+- **Realtime Synchronisatie:** Native HTTP Server-Sent Events (`/api/events`), waardoor ritten en voertuigstatussen direct live worden bijgewerkt op alle geopende schermen zonder polling.
+- **Authenticatie:** Google Identity Provider (Google OAuth) / Firebase Auth met rollensysteem (`user`, `fleet_admin`, `admin`).
+- **Data Export:** CSV-exporteur met UTF-8 BOM ondersteuning voor Microsoft Excel.
+- **Achtergrondservice & Pushmeldingen (Stap 2):** Node.js, Express, `web-push` met VAPID-authenticatie
+  - 24/7 Server Cron ticker (Europe/Brussels) die ingestelde herinneringen controleert.
+  - Directe push naar Apple (APNs) en Google (FCM) push-servers, ook wanneer de smartphone vergrendeld is en de browser gesloten.
+  - Automatische herhalende meldingen voor de module *Vervoer Zoeken* (collega oppikken met verwachte aankomsttijd).
 
 ---
 
@@ -129,6 +134,7 @@ Het systeem hanteert een strikte rolhiërarchie: **Gebruiker < Wagen Administrat
 ### Vereisten
 - [Node.js](https://nodejs.org/) versie 20 of hoger
 - [npm](https://www.npmjs.com/) (meegeleverd met Node.js)
+- [MariaDB](https://mariadb.org/) versie 10.5+ of 11.x (lokaal, Docker of remote)
 
 ### 1. Repository klonen en afhankelijkheden installeren
 ```bash
@@ -139,18 +145,40 @@ cd ritten-logboek
 npm install
 ```
 
-### 2. Firebase Configuratie
-Het project bevat het configuratiebestand `firebase-applet-config.json` in de hoofdmap van het project:
-```json
-{
-  "projectId": "ambient-option-2fx4d",
-  "appId": "1:71388204634:web:73265bc375827c5bb21263",
-  "apiKey": "AIzaSy...",
-  "authDomain": "ambient-option-2fx4d.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-rittenlogboek-2fcfca51-ee68-43ed-a0fb-72736e04a0f7"
-}
+### 2. MariaDB Configuratie (.env)
+Maak in de hoofdmap een `.env` bestand aan (zie ook `.env.example`):
+
+```env
+# MariaDB Verbindingsparameters
+MARIADB_HOST=0.tcp.eu.ngrok.io   # Uw domeinnaam, IP of ngrok host (zonder tcp://)
+MARIADB_PORT=24206               # Standaard 3306, of de poort van uw tunnel
+MARIADB_USER=admin               # Uw databasegebruiker
+MARIADB_PASSWORD=uw_wachtwoord   # Uw databasewachtwoord
+MARIADB_DATABASE=RittenLogger    # De naam van uw database
+MARIADB_SSL=false                # Zet op true indien SSL/TLS vereist is
 ```
-*Opmerking:* Bij gebruik in Google AI Studio wordt deze configuratie automatisch beheerd.
+
+#### Lokale MariaDB koppelen via Ngrok
+Wilt u de app in de cloud laten verbinden met een lokale MariaDB op uw computer?
+1. **Zorg dat MariaDB luistert op alle netwerkpoorten:**
+   In uw `my.ini` (Windows) of `my.cnf` (Linux/Mac):
+   ```ini
+   bind-address = 0.0.0.0
+   ```
+2. **Geef de gebruiker toegang vanop afstand (%):**
+   Voer in phpMyAdmin of uw MySQL-terminal uit:
+   ```sql
+   CREATE USER IF NOT EXISTS 'admin'@'%' IDENTIFIED BY 'uw_wachtwoord';
+   GRANT ALL PRIVILEGES ON RittenLogger.* TO 'admin'@'%';
+   FLUSH PRIVILEGES;
+   ```
+3. **Start de ngrok tunnel:**
+   ```bash
+   ngrok tcp 3306
+   ```
+   Ngrok geeft u een forwarding URL zoals `tcp://0.tcp.eu.ngrok.io:24206`. Vul `0.tcp.eu.ngrok.io` in bij `MARIADB_HOST` en `24206` bij `MARIADB_PORT`.
+4. **Verbinding testen:**
+   Ga in de app naar **Instellingen & Account** en klik bij de MariaDB-kaart op **"Verbinding testen"**.
 
 ### 3. Ontwikkelserver starten
 ```bash
@@ -230,17 +258,21 @@ npm run lint
 
 ## Datamodel & Beveiliging
 
-### Collecties in Firestore
-- `profiles/{userId}`: Gebruikersprofielen met `fullName`, `email`, `role` (`user` \| `fleet_admin` \| `admin`), `teamIds` (array van strings) en `isActive`.
-- `teams/{teamId}`: Teams en afdelingen met `name`, `description` en `isActive`.
-- `vehicles/{vehicleId}`: Wagenpark met `teamId`, `licensePlate`, `brand`, `model`, `nickname`, `lastKnownKm`, `expectedDailyKm` (richtgetal) en `isActive`.
-- `trips/{tripId}`: Rittenlogboek met `vehicleId`, `userId`, `startTime`, `startKm`, `endTime`, `endKm`, `purpose`, `status` (`open` \| `closed` \| `auto_closed`), `closedAutomatically`, `closedReason`, `kmDiscrepancy`, `hasKmDiscrepancy`, `isUnusualDistance`, `expectedTripKm` en timestamps.
-- `daily_readings/{readingId}`: Dagelijkse kilometerstand-controles (`start` of `stop`).
-- `notification_settings/{userId}`: Wekelijkse herinneringstijden per weekdag.
-- `app_settings/{settingId}`: Globale instellingen inclusief configureerbare doelen (tags) en standaard richtgetal dagelijkse kilometers.
+Het relationele database-schema is gedefinieerd in **`src/db/schema.sql`** en wordt bij de eerste verbinding automatisch aangemaakt.
 
-### Beveiliging
-De Firestore-database wordt beschermd door beveiligingsregels in `firestore.rules`. Alleen geverifieerde verzoeken worden verwerkt, en beheeracties (zoals teamcreatie of gebruikersrechten) zijn voorbehouden aan beheerders.
+### Tabellen in MariaDB
+- **`teams`**: Bedrijfsafdelingen en wagenparkteams (`id`, `name`, `description`, `is_active`, `created_at`).
+- **`profiles`**: Gebruikersprofielen en toegangsrollen (`id`, `full_name`, `email`, `role`, `team_ids` (JSON), `is_active`, `created_at`).
+- **`vehicles`**: Bedrijfswagens (`id`, `team_id`, `license_plate`, `brand`, `model`, `nickname`, `is_active`, `last_known_km`, `expected_daily_km`, `created_at`).
+- **`trips`**: Volledig rittenlogboek (`id`, `team_id`, `vehicle_id`, `user_id`, `user_name`, `user_email`, `license_plate`, `vehicle_name`, `start_time`, `start_km`, `end_time`, `end_km`, `purpose`, `notes`, `status`, `closed_automatically`, `closed_reason`, `closed_by_user_id`, `closed_by_user_name`, `km_discrepancy`, `has_km_discrepancy`, `is_unusual_distance`, `expected_trip_km`, `created_at`, `updated_at`).
+- **`daily_readings`**: Dagelijkse kilometerstand-controles (`id`, `team_id`, `vehicle_id`, `user_id`, `user_name`, `reading_date`, `reading_type`, `km`, `recorded_at`, `created_at`).
+- **`app_settings`**: Globale instellingen (`id`, `purposes_json`, `default_expected_daily_km`, `ride_request_module_enabled`, `updated_at`).
+- **`ride_requests`**: Vervoersaanvragen voor collega-oppikmodule (`id`, `requester_id`, `requester_name`, `requester_phone`, `team_id`, `from_location`, `to_location`, `has_materials`, `notes`, `status`, `created_at`, `last_notified_at`, `retry_count`, `driver_id`, `driver_name`, `driver_vehicle_id`, `driver_license_plate`, `driver_vehicle_name`, `eta_minutes`, `accepted_at`).
+- **`push_subscriptions`**: Web Push registraties van mobiele apparaten voor achtergrondnotificaties (`id`, `user_id`, `user_name`, `subscription_json`, `created_at`, `updated_at`).
+
+### Beveiliging & Transacties
+- **SQL Transacties:** De automatische overdracht van ritten wordt atomisch uitgevoerd met `BEGIN TRANSACTION`, `COMMIT` en `ROLLBACK`, waardoor dubbele actieve ritten per wagen strikt onmogelijk zijn.
+- **Data Proxy:** De browser/PWA communiceert uitsluitend via HTTPS REST API routes (`/api/*`), waardoor databasetokens en SQL-credentials veilig op de backend blijven.
 
 ---
 

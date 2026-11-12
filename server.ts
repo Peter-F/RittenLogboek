@@ -745,15 +745,6 @@ setInterval(runBackgroundReminderCheck, 25000);
  * Initialize Vite Dev Server or Production Static Serving
  */
 async function startServer() {
-  // Initialize MariaDB or fallback local persistence
-  try {
-    await initMariaDB();
-    const dbStatus = getDbStatus();
-    console.log(`🗄️ Database mode: ${dbStatus.mode} (connected: ${dbStatus.connected})`);
-  } catch (err: any) {
-    console.warn('⚠️ MariaDB initialization warning:', err?.message);
-  }
-
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (!isProduction) {
@@ -770,9 +761,19 @@ async function startServer() {
     });
   }
 
+  // Start HTTP listener immediately so port 3000 is open in < 500ms
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 WagenRit full-stack server running on http://0.0.0.0:${PORT}`);
     console.log(`⏰ Background push notification service active (Step 2)`);
+
+    // Initialize MariaDB in the background so port 3000 binds instantly
+    initMariaDB()
+      .then((status) => {
+        console.log(`🗄️ Database mode: ${status.mode} (connected: ${status.connected})`);
+      })
+      .catch((err: any) => {
+        console.warn('⚠️ MariaDB background initialization warning:', err?.message);
+      });
   });
 }
 
